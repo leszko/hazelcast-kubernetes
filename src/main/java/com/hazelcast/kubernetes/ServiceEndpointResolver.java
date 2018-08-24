@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2017, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,6 +60,21 @@ class ServiceEndpointResolver
         this.client = buildKubernetesClient(apiToken, kubernetesMaster);
     }
 
+    protected static String readFileContents(String tokenFile) {
+        InputStream is = null;
+        try {
+            File file = new File(tokenFile);
+            byte[] data = new byte[(int) file.length()];
+            is = new FileInputStream(file);
+            is.read(data);
+            return new String(data, "UTF-8");
+        } catch (IOException e) {
+            throw new RuntimeException("Could not get token file", e);
+        } finally {
+            IOUtil.closeResource(is);
+        }
+    }
+
     private KubernetesClient buildKubernetesClient(String token, String kubernetesMaster) {
         if (StringUtil.isNullOrEmpty(token)) {
             token = getAccountToken();
@@ -112,20 +127,5 @@ class ServiceEndpointResolver
     @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     private String getAccountToken() {
         return readFileContents("/var/run/secrets/kubernetes.io/serviceaccount/token");
-    }
-
-    protected static String readFileContents(String tokenFile) {
-        InputStream is = null;
-        try {
-            File file = new File(tokenFile);
-            byte[] data = new byte[(int) file.length()];
-            is = new FileInputStream(file);
-            is.read(data);
-            return new String(data, "UTF-8");
-        } catch (IOException e) {
-            throw new RuntimeException("Could not get token file", e);
-        } finally {
-            IOUtil.closeResource(is);
-        }
     }
 }

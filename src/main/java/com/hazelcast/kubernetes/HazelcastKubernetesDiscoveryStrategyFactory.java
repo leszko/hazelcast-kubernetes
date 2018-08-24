@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2017, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,19 +35,6 @@ public class HazelcastKubernetesDiscoveryStrategyFactory
 
     private static final Collection<PropertyDefinition> PROPERTY_DEFINITIONS;
 
-    static {
-        PROPERTY_DEFINITIONS = Collections.unmodifiableCollection(Arrays.asList(
-                KubernetesProperties.SERVICE_DNS,
-                KubernetesProperties.SERVICE_NAME,
-                KubernetesProperties.SERVICE_PORT,
-                KubernetesProperties.SERVICE_LABEL_NAME,
-                KubernetesProperties.SERVICE_LABEL_VALUE,
-                KubernetesProperties.NAMESPACE,
-                KubernetesProperties.RESOLVE_NOT_READY_ADDRESSES,
-                KubernetesProperties.KUBERNETES_MASTER_URL,
-                KubernetesProperties.KUBERNETES_API_TOKEN));
-    }
-
     public Class<? extends DiscoveryStrategy> getDiscoveryStrategyType() {
         return HazelcastKubernetesDiscoveryStrategy.class;
     }
@@ -60,5 +47,18 @@ public class HazelcastKubernetesDiscoveryStrategyFactory
 
     public Collection<PropertyDefinition> getConfigurationProperties() {
         return PROPERTY_DEFINITIONS;
+    }
+
+    static {
+        PROPERTY_DEFINITIONS = Collections.unmodifiableCollection(Arrays.asList(
+                KubernetesProperties.SERVICE_DNS,
+                KubernetesProperties.SERVICE_NAME,
+                KubernetesProperties.SERVICE_PORT,
+                KubernetesProperties.SERVICE_LABEL_NAME,
+                KubernetesProperties.SERVICE_LABEL_VALUE,
+                KubernetesProperties.NAMESPACE,
+                KubernetesProperties.RESOLVE_NOT_READY_ADDRESSES,
+                KubernetesProperties.KUBERNETES_MASTER_URL,
+                KubernetesProperties.KUBERNETES_API_TOKEN));
     }
 }

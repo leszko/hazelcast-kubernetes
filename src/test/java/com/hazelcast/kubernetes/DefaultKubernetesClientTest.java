@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2017, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,83 +52,9 @@ public class DefaultKubernetesClientTest {
     private static final String SAMPLE_IP_PORT_1 = ipPort(SAMPLE_ADDRESS_1, SAMPLE_PORT_1);
     private static final String SAMPLE_IP_PORT_2 = ipPort(SAMPLE_ADDRESS_2, SAMPLE_PORT_2);
     private static final String SAMPLE_NOT_READY_IP = ipPort(SAMPLE_NOT_READY_ADDRESS, null);
-
+    private final DefaultKubernetesClient kubernetesClient = new DefaultKubernetesClient(KUBERNETES_MASTER_URL, TOKEN);
     @Rule
     public WireMockRule wireMockRule = new WireMockRule(KUBERNETES_MASTER_PORT);
-
-    private final DefaultKubernetesClient kubernetesClient = new DefaultKubernetesClient(KUBERNETES_MASTER_URL, TOKEN);
-
-    @Test
-    public void endpointsByNamespace() {
-        // given
-        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
-                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
-
-        // when
-        Endpoints result = kubernetesClient.endpoints(NAMESPACE);
-
-        // then
-        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
-        assertThat(extractIpPort(result.getNotReadyAddresses()), containsInAnyOrder(SAMPLE_NOT_READY_IP));
-    }
-
-    @Test
-    public void endpointsByNamespaceAndLabel() {
-        // given
-        String serviceLabel = "sample-service-label";
-        String serviceLabelValue = "sample-service-label-value";
-        stubFor(get(urlPathMatching(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
-                .withQueryParam("labelSelector", equalTo(String.format("%s=%s", serviceLabel, serviceLabelValue)))
-                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
-
-        // when
-        Endpoints result = kubernetesClient.endpointsByLabel(NAMESPACE, serviceLabel, serviceLabelValue);
-
-        // then
-        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
-        assertThat(extractIpPort(result.getNotReadyAddresses()), containsInAnyOrder(SAMPLE_NOT_READY_IP));
-
-    }
-
-    @Test
-    public void endpointsByNamespaceAndServiceName() {
-        // given
-        String serviceName = "service-name";
-        stubFor(get(urlPathMatching(String.format("/api/v1/namespaces/%s/endpoints/%s", NAMESPACE, serviceName)))
-                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(endpointsBody())));
-
-        // when
-        Endpoints result = kubernetesClient.endpointsByName(NAMESPACE, serviceName);
-
-        // then
-        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
-        assertTrue(result.getNotReadyAddresses().isEmpty());
-    }
-
-    @Test(expected = KubernetesClientException.class)
-    public void forbidden() {
-        // given
-        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
-                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(501).withBody(forbiddenBody())));
-
-        // when
-        kubernetesClient.endpoints(NAMESPACE);
-    }
-
-    @Test(expected = KubernetesClientException.class)
-    public void malformedResponse() {
-        // given
-        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
-                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(malformedBody())));
-
-        // when
-        kubernetesClient.endpoints(NAMESPACE);
-    }
 
     /**
      * Real response recorded from the Kubernetes API call "/api/v1/namespaces/{namespace}/endpoints".
@@ -317,5 +243,77 @@ public class DefaultKubernetesClientTest {
 
     private static String ipPort(String ip, String port) {
         return String.format("%s:%s", ip, port);
+    }
+
+    @Test
+    public void endpointsByNamespace() {
+        // given
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
+
+        // when
+        Endpoints result = kubernetesClient.endpoints(NAMESPACE);
+
+        // then
+        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
+        assertThat(extractIpPort(result.getNotReadyAddresses()), containsInAnyOrder(SAMPLE_NOT_READY_IP));
+    }
+
+    @Test
+    public void endpointsByNamespaceAndLabel() {
+        // given
+        String serviceLabel = "sample-service-label";
+        String serviceLabelValue = "sample-service-label-value";
+        stubFor(get(urlPathMatching(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
+                .withQueryParam("labelSelector", equalTo(String.format("%s=%s", serviceLabel, serviceLabelValue)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
+
+        // when
+        Endpoints result = kubernetesClient.endpointsByLabel(NAMESPACE, serviceLabel, serviceLabelValue);
+
+        // then
+        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
+        assertThat(extractIpPort(result.getNotReadyAddresses()), containsInAnyOrder(SAMPLE_NOT_READY_IP));
+
+    }
+
+    @Test
+    public void endpointsByNamespaceAndServiceName() {
+        // given
+        String serviceName = "service-name";
+        stubFor(get(urlPathMatching(String.format("/api/v1/namespaces/%s/endpoints/%s", NAMESPACE, serviceName)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(endpointsBody())));
+
+        // when
+        Endpoints result = kubernetesClient.endpointsByName(NAMESPACE, serviceName);
+
+        // then
+        assertThat(extractIpPort(result.getAddresses()), containsInAnyOrder(SAMPLE_IP_PORT_1, SAMPLE_IP_PORT_2));
+        assertTrue(result.getNotReadyAddresses().isEmpty());
+    }
+
+    @Test(expected = KubernetesClientException.class)
+    public void forbidden() {
+        // given
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(501).withBody(forbiddenBody())));
+
+        // when
+        kubernetesClient.endpoints(NAMESPACE);
+    }
+
+    @Test(expected = KubernetesClientException.class)
+    public void malformedResponse() {
+        // given
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(malformedBody())));
+
+        // when
+        kubernetesClient.endpoints(NAMESPACE);
     }
 }

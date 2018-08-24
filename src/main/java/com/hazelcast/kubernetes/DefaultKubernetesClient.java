@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2017, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,52 +66,6 @@ class DefaultKubernetesClient
     DefaultKubernetesClient(String kubernetesMaster, String apiToken) {
         this.kubernetesMaster = kubernetesMaster;
         this.apiToken = apiToken;
-    }
-
-    @Override
-    public Endpoints endpoints(String namespace) {
-        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
-        return parseEndpointsList(callGet(urlString));
-
-    }
-
-    @Override
-    public Endpoints endpointsByLabel(String namespace, String serviceLabel, String serviceLabelValue) {
-        String param = String.format("labelSelector=%s=%s", serviceLabel, serviceLabelValue);
-        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints?%s", kubernetesMaster, namespace, param);
-        return parseEndpointsList(callGet(urlString));
-    }
-
-    @Override
-    public Endpoints endpointsByName(String namespace, String endpointName) {
-        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
-        JsonObject json = callGet(urlString);
-        return parseEndpoint(json);
-    }
-
-    private JsonObject callGet(String urlString) {
-        HttpURLConnection connection = null;
-        try {
-            URL url = new URL(urlString);
-            connection = (HttpURLConnection) url.openConnection();
-            if (connection instanceof HttpsURLConnection) {
-                ((HttpsURLConnection) connection).setSSLSocketFactory(buildSslSocketFactory());
-            }
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("Authorization", String.format("Bearer %s", apiToken));
-
-            if (connection.getResponseCode() != HTTP_OK) {
-                throw new KubernetesClientException(String.format("Failure executing: GET at: %s. Message: %s,", urlString,
-                        read(connection.getErrorStream())));
-            }
-            return Json.parse(read(connection.getInputStream())).asObject();
-        } catch (Exception e) {
-            throw new KubernetesClientException("Failure in KubernetesClient", e);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
-        }
     }
 
     private static String read(InputStream stream) {
@@ -223,6 +177,52 @@ class DefaultKubernetesClient
     @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     private static String caCertPath() {
         return "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
+    }
+
+    @Override
+    public Endpoints endpoints(String namespace) {
+        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
+        return parseEndpointsList(callGet(urlString));
+
+    }
+
+    @Override
+    public Endpoints endpointsByLabel(String namespace, String serviceLabel, String serviceLabelValue) {
+        String param = String.format("labelSelector=%s=%s", serviceLabel, serviceLabelValue);
+        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints?%s", kubernetesMaster, namespace, param);
+        return parseEndpointsList(callGet(urlString));
+    }
+
+    @Override
+    public Endpoints endpointsByName(String namespace, String endpointName) {
+        String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
+        JsonObject json = callGet(urlString);
+        return parseEndpoint(json);
+    }
+
+    private JsonObject callGet(String urlString) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            if (connection instanceof HttpsURLConnection) {
+                ((HttpsURLConnection) connection).setSSLSocketFactory(buildSslSocketFactory());
+            }
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Authorization", String.format("Bearer %s", apiToken));
+
+            if (connection.getResponseCode() != HTTP_OK) {
+                throw new KubernetesClientException(String.format("Failure executing: GET at: %s. Message: %s,", urlString,
+                        read(connection.getErrorStream())));
+            }
+            return Json.parse(read(connection.getInputStream())).asObject();
+        } catch (Exception e) {
+            throw new KubernetesClientException("Failure in KubernetesClient", e);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
 }

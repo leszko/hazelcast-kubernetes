@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.hazelcast.kubernetes;
 
 import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
@@ -44,6 +60,35 @@ public class ServiceEndpointResolverTest {
 
     @Mock
     private RetryKubernetesClient client;
+
+    private static String createTestFile(String expectedContents)
+            throws IOException {
+        File temp = File.createTempFile("test", ".tmp");
+        temp.deleteOnExit();
+        BufferedWriter bufferedWriter = null;
+        try {
+            bufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), Charset.forName("UTF-8")));
+            bufferedWriter.write(expectedContents);
+        } finally {
+            IOUtil.closeResource(bufferedWriter);
+        }
+        return temp.getAbsolutePath();
+    }
+
+    private static Endpoints createEndpoints(int customPort) {
+        return new Endpoints(asList(createEntrypointAddress(customPort)), Collections.<EntrypointAddress>emptyList());
+    }
+
+    private static Endpoints createNotReadyEndpoints(int customPort) {
+        return new Endpoints(Collections.<EntrypointAddress>emptyList(), asList(createEntrypointAddress(customPort)));
+    }
+
+    private static EntrypointAddress createEntrypointAddress(int customPort) {
+        String ip = "1.1.1.1";
+        Map<String, Object> additionalProperties = new HashMap<String, Object>();
+        additionalProperties.put("hazelcast-service-port", String.valueOf(customPort));
+        return new EntrypointAddress(ip, additionalProperties);
+    }
 
     @Before
     public void setup()
@@ -150,34 +195,5 @@ public class ServiceEndpointResolverTest {
         String testFile = createTestFile(expectedContents);
         String actualContents = ServiceEndpointResolver.readFileContents(testFile);
         Assert.assertEquals(expectedContents, actualContents);
-    }
-
-    private static String createTestFile(String expectedContents)
-            throws IOException {
-        File temp = File.createTempFile("test", ".tmp");
-        temp.deleteOnExit();
-        BufferedWriter bufferedWriter = null;
-        try {
-            bufferedWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), Charset.forName("UTF-8")));
-            bufferedWriter.write(expectedContents);
-        } finally {
-            IOUtil.closeResource(bufferedWriter);
-        }
-        return temp.getAbsolutePath();
-    }
-
-    private static Endpoints createEndpoints(int customPort) {
-        return new Endpoints(asList(createEntrypointAddress(customPort)), Collections.<EntrypointAddress>emptyList());
-    }
-
-    private static Endpoints createNotReadyEndpoints(int customPort) {
-        return new Endpoints(Collections.<EntrypointAddress>emptyList(), asList(createEntrypointAddress(customPort)));
-    }
-
-    private static EntrypointAddress createEntrypointAddress(int customPort) {
-        String ip = "1.1.1.1";
-        Map<String, Object> additionalProperties = new HashMap<String, Object>();
-        additionalProperties.put("hazelcast-service-port", String.valueOf(customPort));
-        return new EntrypointAddress(ip, additionalProperties);
     }
 }
