@@ -17,7 +17,7 @@
 package com.hazelcast.kubernetes;
 
 import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
-import com.hazelcast.kubernetes.KubernetesClient.EntrypointAddress;
+import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.NoLogFactory;
 import com.hazelcast.spi.discovery.DiscoveryNode;
@@ -59,8 +59,8 @@ public class KubernetesApiEndpointResolverTest {
     @Test
     public void resolveWhenNodeInFound() {
         // given
-        Endpoints endpoints = new Endpoints(Collections.<EntrypointAddress>emptyList(),
-                Collections.<EntrypointAddress>emptyList());
+        Endpoints endpoints = new Endpoints(Collections.<Endpoint>emptyList(),
+                Collections.<Endpoint>emptyList());
         given(client.endpoints(NAMESPACE)).willReturn(endpoints);
 
         KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, null, 0, null, null, NAMESPACE, null,
@@ -150,15 +150,15 @@ public class KubernetesApiEndpointResolverTest {
     }
 
     private static Endpoints createEndpoints(int customPort) {
-        return new Endpoints(asList(createEntrypointAddress(customPort)), Collections.<EntrypointAddress>emptyList());
+        return new Endpoints(asList(createEntrypointAddress(customPort)), Collections.<Endpoint>emptyList());
     }
 
     private static Endpoints createNotReadyEndpoints(int customPort) {
-        return new Endpoints(Collections.<EntrypointAddress>emptyList(), asList(createEntrypointAddress(customPort)));
+        return new Endpoints(Collections.<Endpoint>emptyList(), asList(createEntrypointAddress(customPort)));
     }
 
-    private static EntrypointAddress createEntrypointAddress(int customPort) {
+    private static Endpoint createEntrypointAddress(int customPort) {
         String ip = "1.1.1.1";
-        return new EntrypointAddress(ip, customPort, new HashMap<String, Object>());
+        return new Endpoint(new KubernetesClient.EndpointAddress(ip, customPort), new HashMap<String, Object>());
     }
 }

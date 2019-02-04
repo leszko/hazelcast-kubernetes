@@ -18,7 +18,7 @@ package com.hazelcast.kubernetes;
 
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
-import com.hazelcast.kubernetes.KubernetesClient.EntrypointAddress;
+import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -152,6 +152,11 @@ public class DefaultKubernetesClientTest {
 
         // then
         assertEquals(ZONE, zone);
+    }
+
+    @Test
+    public void publicIp() {
+
     }
 
     @Test(expected = KubernetesClientException.class)
@@ -1519,7 +1524,7 @@ public class DefaultKubernetesClientTest {
                 + "}";
     }
 
-    private static String servicePublicIpBody() {
+    private static String serviceBody() {
         return "{\n"
                 + "  \"kind\": \"Service\",\n"
                 + "  \"apiVersion\": \"v1\",\n"
@@ -1586,11 +1591,11 @@ public class DefaultKubernetesClientTest {
         return "malformed response";
     }
 
-    private static List<String> extractIpPort(List<EntrypointAddress> addresses) {
+    private static List<String> extractIpPort(List<Endpoint> addresses) {
         List<String> result = new ArrayList<String>();
-        for (EntrypointAddress address : addresses) {
-            String ip = address.getIp();
-            Integer port = address.getPort();
+        for (Endpoint address : addresses) {
+            String ip = address.getPrivateAddress().getIp();
+            Integer port = address.getPrivateAddress().getPort();
             result.add(ipPort(ip, port));
         }
         return result;

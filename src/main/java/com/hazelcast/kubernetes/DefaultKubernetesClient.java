@@ -133,15 +133,15 @@ class DefaultKubernetesClient
     }
 
     private static Endpoints parsePodsList(JsonObject json) {
-        List<EntrypointAddress> addresses = new ArrayList<EntrypointAddress>();
-        List<EntrypointAddress> notReadyAddresses = new ArrayList<EntrypointAddress>();
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+        List<Endpoint> notReadyAddresses = new ArrayList<Endpoint>();
 
         for (JsonValue item : toJsonArray(json.get("items"))) {
             JsonObject status = item.asObject().get("status").asObject();
             String ip = toString(status.get("podIP"));
             if (ip != null) {
                 Integer port = getPortFromPodItem(item);
-                EntrypointAddress address = new EntrypointAddress(ip, port, EMPTY_MAP);
+                Endpoint address = new Endpoint(new EndpointAddress(ip, port), EMPTY_MAP);
 
                 if (isReady(status)) {
                     addresses.add(address);
@@ -183,8 +183,8 @@ class DefaultKubernetesClient
     }
 
     private static Endpoints parseEndpointsList(JsonObject json) {
-        List<EntrypointAddress> addresses = new ArrayList<EntrypointAddress>();
-        List<EntrypointAddress> notReadyAddresses = new ArrayList<EntrypointAddress>();
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+        List<Endpoint> notReadyAddresses = new ArrayList<Endpoint>();
 
         for (JsonValue object : toJsonArray(json.get("items"))) {
             Endpoints endpoints = parseEndpoint(object);
@@ -196,8 +196,8 @@ class DefaultKubernetesClient
     }
 
     private static Endpoints parseEndpoint(JsonValue endpointsJson) {
-        List<EntrypointAddress> addresses = new ArrayList<EntrypointAddress>();
-        List<EntrypointAddress> notReadyAddresses = new ArrayList<EntrypointAddress>();
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+        List<Endpoint> notReadyAddresses = new ArrayList<Endpoint>();
 
         for (JsonValue subset : toJsonArray(endpointsJson.asObject().get("subsets"))) {
             for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
@@ -210,11 +210,11 @@ class DefaultKubernetesClient
         return new Endpoints(addresses, notReadyAddresses);
     }
 
-    private static EntrypointAddress parseEntrypointAddress(JsonValue endpointAddressJson) {
+    private static Endpoint parseEntrypointAddress(JsonValue endpointAddressJson) {
         String ip = endpointAddressJson.asObject().get("ip").asString();
         Integer port = getPortFromEndpointAddress(endpointAddressJson);
         Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
-        return new EntrypointAddress(ip, port, additionalProperties);
+        return new Endpoint(new EndpointAddress(ip, port), additionalProperties);
     }
 
     private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson) {

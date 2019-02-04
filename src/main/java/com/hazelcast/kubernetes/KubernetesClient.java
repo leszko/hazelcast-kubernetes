@@ -72,53 +72,71 @@ interface KubernetesClient {
      * Result which stores the information about all addresses.
      */
     final class Endpoints {
-        private final List<EntrypointAddress> addresses;
-        private final List<EntrypointAddress> notReadyAddresses;
+        private final List<Endpoint> addresses;
+        private final List<Endpoint> notReadyAddresses;
 
-        Endpoints(List<EntrypointAddress> addresses, List<EntrypointAddress> notReadyAddresses) {
+        Endpoints(List<Endpoint> addresses, List<Endpoint> notReadyAddresses) {
             this.addresses = addresses;
             this.notReadyAddresses = notReadyAddresses;
         }
 
-        List<EntrypointAddress> getAddresses() {
+        List<Endpoint> getAddresses() {
             return addresses;
         }
 
-        List<EntrypointAddress> getNotReadyAddresses() {
+        List<Endpoint> getNotReadyAddresses() {
             return notReadyAddresses;
         }
     }
 
     /**
-     * Result which stores the information about a single address.
+     * Result which stores the information about a single endpoint.
      */
-    final class EntrypointAddress {
-        private final String ip;
-        private final Integer port;
+    final class Endpoint {
+        private final EndpointAddress privateAddress;
+        private final EndpointAddress publicAddress;
         private final Map<String, Object> additionalProperties;
 
-        EntrypointAddress(String ip, Map<String, Object> additionalProperties) {
-            this.ip = ip;
-            this.port = null;
+        Endpoint(EndpointAddress privateAddress, Map<String, Object> additionalProperties) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = null;
             this.additionalProperties = additionalProperties;
         }
 
-        EntrypointAddress(String ip, Integer port, Map<String, Object> additionalProperties) {
-            this.ip = ip;
-            this.port = port;
+        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, Map<String, Object> additionalProperties) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = publicAddress;
             this.additionalProperties = additionalProperties;
         }
 
-        String getIp() {
-            return ip;
+        public EndpointAddress getPublicAddress() {
+            return publicAddress;
         }
 
-        Integer getPort() {
-            return port;
+        public EndpointAddress getPrivateAddress() {
+            return privateAddress;
         }
 
         Map<String, Object> getAdditionalProperties() {
             return additionalProperties;
+        }
+    }
+
+    final class EndpointAddress {
+        private final String ip;
+        private final Integer port;
+
+        public EndpointAddress(String ip, Integer port) {
+            this.ip = ip;
+            this.port = port;
+        }
+
+        public String getIp() {
+            return ip;
+        }
+
+        public Integer getPort() {
+            return port;
         }
     }
 }

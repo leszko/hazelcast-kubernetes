@@ -18,7 +18,7 @@ package com.hazelcast.kubernetes;
 
 import com.hazelcast.config.NetworkConfig;
 import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
-import com.hazelcast.kubernetes.KubernetesClient.EntrypointAddress;
+import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.nio.Address;
 import com.hazelcast.spi.discovery.DiscoveryNode;
@@ -70,35 +70,35 @@ class KubernetesApiEndpointResolver
         return discoveredNodes;
     }
 
-    private void resolveNotReadyAddresses(List<DiscoveryNode> discoveredNodes, List<EntrypointAddress> notReadyAddresses) {
+    private void resolveNotReadyAddresses(List<DiscoveryNode> discoveredNodes, List<Endpoint> notReadyAddresses) {
         if (Boolean.TRUE.equals(resolveNotReadyAddresses)) {
             resolveAddresses(discoveredNodes, notReadyAddresses);
         }
     }
 
-    private void resolveAddresses(List<DiscoveryNode> discoveredNodes, List<EntrypointAddress> addresses) {
-        for (EntrypointAddress address : addresses) {
+    private void resolveAddresses(List<DiscoveryNode> discoveredNodes, List<Endpoint> addresses) {
+        for (Endpoint address : addresses) {
             addAddress(discoveredNodes, address);
         }
     }
 
-    private void addAddress(List<DiscoveryNode> discoveredNodes, EntrypointAddress entrypointAddress) {
-        String ip = entrypointAddress.getIp();
+    private void addAddress(List<DiscoveryNode> discoveredNodes, Endpoint endpoint) {
+        String ip = endpoint.getPrivateAddress().getIp();
         InetAddress inetAddress = mapAddress(ip);
-        int port = port(entrypointAddress);
+        int port = port(endpoint);
         Address address = new Address(inetAddress, port);
-        discoveredNodes.add(new SimpleDiscoveryNode(address, entrypointAddress.getAdditionalProperties()));
+        discoveredNodes.add(new SimpleDiscoveryNode(address, endpoint.getAdditionalProperties()));
         if (logger.isFinestEnabled()) {
             logger.finest("Found node service with address: " + address);
         }
     }
 
-    private int port(EntrypointAddress entrypointAddress) {
+    private int port(Endpoint endpoint) {
         if (this.port > 0) {
             return this.port;
         }
-        if (entrypointAddress.getPort() != null) {
-            return entrypointAddress.getPort();
+        if (endpoint.getPrivateAddress().getPort() != null) {
+            return endpoint.getPrivateAddress().getPort();
         }
         return NetworkConfig.DEFAULT_PORT;
     }
