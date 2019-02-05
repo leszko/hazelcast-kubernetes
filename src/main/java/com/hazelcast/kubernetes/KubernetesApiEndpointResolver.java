@@ -83,22 +83,30 @@ class KubernetesApiEndpointResolver
     }
 
     private void addAddress(List<DiscoveryNode> discoveredNodes, Endpoint endpoint) {
-        String ip = endpoint.getPrivateAddress().getIp();
-        InetAddress inetAddress = mapAddress(ip);
-        int port = port(endpoint);
-        Address address = new Address(inetAddress, port);
-        discoveredNodes.add(new SimpleDiscoveryNode(address, endpoint.getAdditionalProperties()));
+        Address address = createAddress(endpoint.getPrivateAddress());
+        Address publicAddress = createAddress(endpoint.getPublicAddress());
+        discoveredNodes.add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getAdditionalProperties()));
         if (logger.isFinestEnabled()) {
             logger.finest("Found node service with address: " + address);
         }
     }
 
-    private int port(Endpoint endpoint) {
+    private Address createAddress(KubernetesClient.EndpointAddress address) {
+        if (address == null) {
+            return null;
+        }
+        String ip = address.getIp();
+        InetAddress inetAddress = mapAddress(ip);
+        int port = port(address);
+        return new Address(inetAddress, port);
+    }
+
+    private int port(KubernetesClient.EndpointAddress address) {
         if (this.port > 0) {
             return this.port;
         }
-        if (endpoint.getPrivateAddress().getPort() != null) {
-            return endpoint.getPrivateAddress().getPort();
+        if (address.getPort() != null) {
+            return address.getPort();
         }
         return NetworkConfig.DEFAULT_PORT;
     }
