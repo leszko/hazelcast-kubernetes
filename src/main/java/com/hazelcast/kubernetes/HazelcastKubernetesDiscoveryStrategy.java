@@ -240,7 +240,7 @@ final class HazelcastKubernetesDiscoveryStrategy
     }
 
     private KubernetesClient buildKubernetesClient(String kubernetesMaster, String accessToken, String caCertificate) {
-        return new RetryKubernetesClient(new DefaultKubernetesClient(kubernetesMaster, accessToken, caCertificate));
+        return new KubernetesClient(kubernetesMaster, accessToken, caCertificate);
     }
 
     @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")

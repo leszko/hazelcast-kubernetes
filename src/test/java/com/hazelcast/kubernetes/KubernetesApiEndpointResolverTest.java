@@ -48,12 +48,12 @@ public class KubernetesApiEndpointResolverTest {
     private static final String NAMESPACE = "theNamespace";
 
     @Mock
-    private RetryKubernetesClient client;
+    private KubernetesClient client;
 
     @Before
     public void setup()
             throws Exception {
-        PowerMockito.whenNew(RetryKubernetesClient.class).withAnyArguments().thenReturn(client);
+        PowerMockito.whenNew(KubernetesClient.class).withAnyArguments().thenReturn(client);
     }
 
     @Test

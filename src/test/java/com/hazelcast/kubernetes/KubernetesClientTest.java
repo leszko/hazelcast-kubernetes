@@ -39,7 +39,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class DefaultKubernetesClientTest {
+public class KubernetesClientTest {
     private static final String KUBERNETES_MASTER_IP = "localhost";
 
     private static final String TOKEN = "sample-token";
@@ -76,12 +76,12 @@ public class DefaultKubernetesClientTest {
     @Rule
     public WireMockRule wireMockRule = new WireMockRule(wireMockConfig().dynamicPort());
 
-    private DefaultKubernetesClient kubernetesClient;
+    private KubernetesClient kubernetesClient;
 
     @Before
     public void setUp() {
         String kubernetesMasterUrl = String.format("http://%s:%d", KUBERNETES_MASTER_IP, wireMockRule.port());
-        kubernetesClient = new DefaultKubernetesClient(kubernetesMasterUrl, TOKEN, CA_CERTIFICATE);
+        kubernetesClient = new KubernetesClient(kubernetesMasterUrl, TOKEN, CA_CERTIFICATE);
         stubFor(get(urlMatching("/api/.*")).atPriority(5).willReturn(aResponse().withStatus(401)));
     }
 
@@ -237,7 +237,7 @@ public class DefaultKubernetesClientTest {
     public void nullToken() {
         // given
         String kubernetesMasterUrl = String.format("http://%s:%d", KUBERNETES_MASTER_IP, wireMockRule.port());
-        KubernetesClient kubernetesClient = new DefaultKubernetesClient(kubernetesMasterUrl, TOKEN, null);
+        KubernetesClient kubernetesClient = new KubernetesClient(kubernetesMasterUrl, TOKEN, null);
 
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/pods", NAMESPACE)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
