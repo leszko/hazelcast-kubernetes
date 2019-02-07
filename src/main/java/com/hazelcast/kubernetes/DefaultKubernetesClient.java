@@ -327,35 +327,13 @@ class DefaultKubernetesClient
     }
 
     private JsonObject callGet(String urlString) {
-        HttpURLConnection connection = null;
         try {
-            URL url = new URL(urlString);
-            connection = (HttpURLConnection) url.openConnection();
-            if (connection instanceof HttpsURLConnection) {
-                ((HttpsURLConnection) connection).setSSLSocketFactory(buildSslSocketFactory());
-            }
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("Authorization", String.format("Bearer %s", apiToken));
-
-            if (connection.getResponseCode() != HTTP_OK) {
-                throw new KubernetesClientException(String.format("Failure executing: GET at: %s. Message: %s,", urlString,
-                        read(connection.getErrorStream())));
-            }
-            String read = read(connection.getInputStream());
-            return Json.parse(read).asObject();
+            return Json
+                    .parse(RestClient.create(urlString).withHeader("Authorization", String.format("Bearer %s", apiToken)).get())
+                    .asObject();
         } catch (Exception e) {
             throw new KubernetesClientException("Failure in KubernetesClient", e);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
         }
-    }
-
-    private static String read(InputStream stream) {
-        Scanner scanner = new Scanner(stream, "UTF-8");
-        scanner.useDelimiter("\\Z");
-        return scanner.next();
     }
 
     private static Endpoints parsePodsList(JsonObject json) {
