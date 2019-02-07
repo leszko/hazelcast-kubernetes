@@ -18,12 +18,22 @@ package com.hazelcast.kubernetes;
 
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
+import com.hazelcast.nio.IOUtil;
 
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.ByteArrayInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -39,6 +49,7 @@ final class RestClient {
     private final String url;
     private final List<Header> headers = new ArrayList<Header>();
     private String body;
+    private String caCertificate;
 
     private RestClient(String url) {
         this.url = url;
@@ -58,6 +69,11 @@ final class RestClient {
         return this;
     }
 
+    RestClient withCaCertificate(String caCertificate) {
+        this.caCertificate = caCertificate;
+        return this;
+    }
+
     String get() {
         return call("GET");
     }
@@ -72,6 +88,9 @@ final class RestClient {
         try {
             URL urlToConnect = new URL(url);
             connection = (HttpURLConnection) urlToConnect.openConnection();
+            if (connection instanceof HttpsURLConnection) {
+                ((HttpsURLConnection) connection).setSSLSocketFactory(buildSslSocketFactory());
+            }
             connection.setRequestMethod(method);
             for (Header header : headers) {
                 connection.setRequestProperty(header.getKey(), header.getValue());
@@ -136,4 +155,39 @@ final class RestClient {
         }
     }
 
+    /**
+     * Builds SSL Socket Factory with the public CA Certificate from Kubernetes Master.
+     */
+    private SSLSocketFactory buildSslSocketFactory() {
+        try {
+            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            keyStore.load(null, null);
+            keyStore.setCertificateEntry("ca", generateCertificate());
+
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(keyStore);
+
+            SSLContext context = SSLContext.getInstance("TLSv1.2");
+            context.init(null, tmf.getTrustManagers(), null);
+            return context.getSocketFactory();
+
+        } catch (Exception e) {
+            throw new KubernetesClientException("Failure in generating SSLSocketFactory", e);
+        }
+    }
+
+    /**
+     * Generates CA Certificate from the default CA Cert file or from the externally provided "ca-certificate" property.
+     */
+    private Certificate generateCertificate()
+            throws IOException, CertificateException {
+        InputStream caInput = null;
+        try {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            caInput = new ByteArrayInputStream(caCertificate.getBytes("UTF-8"));
+            return cf.generateCertificate(caInput);
+        } finally {
+            IOUtil.closeResource(caInput);
+        }
+    }
 }
