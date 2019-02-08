@@ -20,10 +20,11 @@ import com.hazelcast.internal.json.Json;
 import com.hazelcast.internal.json.JsonArray;
 import com.hazelcast.internal.json.JsonObject;
 import com.hazelcast.internal.json.JsonValue;
+import com.hazelcast.logging.ILogger;
+import com.hazelcast.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -40,6 +41,7 @@ import static java.util.Collections.EMPTY_MAP;
  * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/">Kubernetes API</a>
  */
 class KubernetesClient {
+    private static final ILogger LOGGER = Logger.getLogger(KubernetesClient.class);
     private static final int RETRIES = 1;
     private static final List<String> NON_RETRYABLE_KEYWORDS = Arrays.asList("\"reason\":\"Forbidden\"");
 
@@ -125,6 +127,24 @@ class KubernetesClient {
             }
         }
         return addresses;
+    }
+
+    private static Integer getPortFromPodItem(JsonValue item) {
+        JsonArray containers = toJsonArray(item.asObject().get("spec").asObject().get("containers"));
+        // If multiple containers are in one POD, then use the default Hazelcast port from the configuration.
+        if (containers.size() == 1) {
+            JsonValue container = containers.get(0);
+            JsonArray ports = toJsonArray(container.asObject().get("ports"));
+            // If multiple ports are exposed by a container, then use the default Hazelcast port from the configuration.
+            if (ports.size() == 1) {
+                JsonValue port = ports.get(0);
+                JsonValue containerPort = port.asObject().get("containerPort");
+                if (containerPort != null && containerPort.isNumber()) {
+                    return containerPort.asInt();
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean isReady(JsonObject status) {
@@ -222,36 +242,34 @@ class KubernetesClient {
      */
     private List<Endpoint> enrichPublicAddresses(List<Endpoint> endpoints) {
         try {
-            List<EndpointAddress> pods = extractPodsFrom(endpoints);
+            String endpointsUrl = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
+            JsonObject endpointsResponse = callGet(endpointsUrl);
 
-            String urlString = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
-            JsonObject endpointsResult = callGet(urlString);
+            List<EndpointAddress> privateAddresses = extractPrivateAddresses(endpoints);
+            Map<EndpointAddress, String> services = parseServices(endpointsResponse, privateAddresses);
+            Map<EndpointAddress, String> nodes = parseNodes(endpointsResponse, privateAddresses);
 
-            Map<EndpointAddress, String> podToServiceName = parsePodToServiceName(endpointsResult, pods);
-            Map<EndpointAddress, String> podToNodeName = parseEndpointsToNodeName(endpointsResult, pods);
-            Map<String, String> serviceToNodePort = fetchNodePortFor(podToServiceName.values());
-            Map<String, String> nodeToPublicIp = fetchPublicIpFor(podToNodeName.values());
+            Map<EndpointAddress, Integer> nodePorts = nodePortsFor(services);
+            Map<EndpointAddress, String> nodePublicIps = publicIpsFor(nodes);
 
-            List<Endpoint> addresses = new ArrayList<Endpoint>();
-            for (Endpoint endpoint : endpoints) {
-                addresses.add(createEndpointFrom(endpoint, podToServiceName, podToNodeName, serviceToNodePort, nodeToPublicIp));
-            }
-            return addresses;
+            return createEndpoints(endpoints, nodePublicIps, nodePorts);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.finest(e);
+            LOGGER.warning(
+                    "Cannot fetch public IPs of Hazelcast Member PODs, won't be able to use Hazelcast Smart Client from outside the Kubernetes network");
             return endpoints;
         }
     }
 
-    private static List<EndpointAddress> extractPodsFrom(List<Endpoint> endpoints) {
+    private static List<EndpointAddress> extractPrivateAddresses(List<Endpoint> endpoints) {
         List<EndpointAddress> result = new ArrayList<EndpointAddress>();
         for (Endpoint endpoint : endpoints) {
-            result.add(new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort()));
+            result.add(endpoint.getPrivateAddress());
         }
         return result;
     }
 
-    private static Map<EndpointAddress, String> parsePodToServiceName(JsonObject json, List<EndpointAddress> pods) {
+    private static Map<EndpointAddress, String> parseServices(JsonObject json, List<EndpointAddress> pods) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
         Set<EndpointAddress> left = new HashSet<EndpointAddress>(pods);
         for (JsonValue item : toJsonArray(json.get("items"))) {
@@ -297,7 +315,7 @@ class KubernetesClient {
         return result;
     }
 
-    private Map<EndpointAddress, String> parseEndpointsToNodeName(JsonObject json, List<EndpointAddress> pods) {
+    private Map<EndpointAddress, String> parseNodes(JsonObject json, List<EndpointAddress> pods) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
         Set<EndpointAddress> left = new HashSet<EndpointAddress>(pods);
         for (JsonValue item : toJsonArray(json.get("items"))) {
@@ -336,32 +354,44 @@ class KubernetesClient {
         return result;
     }
 
-    private Map<String, String> fetchNodePortFor(Collection<String> serviceNames) {
-        Map<String, String> result = new HashMap<String, String>();
-        for (String serviceName : serviceNames) {
-            if (!result.containsKey(serviceName)) {
-                String urlString = String.format("%s/api/v1/namespaces/%s/services/%s", kubernetesMaster, namespace, serviceName);
-                result.put(serviceName, parseNodePort(callGet(urlString)));
+    private Map<EndpointAddress, Integer> nodePortsFor(Map<EndpointAddress, String> services) {
+        Map<EndpointAddress, Integer> result = new HashMap<EndpointAddress, Integer>();
+        Map<String, Integer> nodePortByService = new HashMap<String, Integer>();
+        for (EndpointAddress privateAddress : services.keySet()) {
+            String service = services.get(privateAddress);
+            if (nodePortByService.containsKey(service)) {
+                result.put(privateAddress, nodePortByService.get(service));
+            } else {
+                String urlString = String.format("%s/api/v1/namespaces/%s/services/%s", kubernetesMaster, namespace, service);
+                Integer nodePort = parseNodePort(callGet(urlString));
+                result.put(privateAddress, nodePort);
+                nodePortByService.put(service, nodePort);
             }
         }
         return result;
     }
 
-    private String parseNodePort(JsonObject json) {
+    private Integer parseNodePort(JsonObject json) {
         JsonArray ports = toJsonArray(json.get("spec").asObject().get("ports"));
         if (ports.size() != 1) {
             throw new RuntimeException("!!!!");
         }
         JsonValue port = ports.get(0);
-        return toString(port.asObject().get("nodePort"));
+        return port.asObject().get("nodePort").asInt();
     }
 
-    private Map<String, String> fetchPublicIpFor(Collection<String> nodeNames) {
-        Map<String, String> result = new HashMap<String, String>();
-        for (String nodeName : nodeNames) {
-            if (!result.containsKey(nodeName)) {
-                String urlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, nodeName);
-                result.put(nodeName, parsePublicIp(callGet(urlString)));
+    private Map<EndpointAddress, String> publicIpsFor(Map<EndpointAddress, String> nodes) {
+        Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
+        Map<String, String> publicIpByNode = new HashMap<String, String>();
+        for (EndpointAddress privateAddress : nodes.keySet()) {
+            String node = nodes.get(privateAddress);
+            if (publicIpByNode.containsKey(node)) {
+                result.put(privateAddress, publicIpByNode.get(node));
+            } else {
+                String urlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, node);
+                String publicIp = parsePublicIp(callGet(urlString));
+                result.put(privateAddress, publicIp);
+                publicIpByNode.put(node, publicIp);
             }
         }
         return result;
@@ -376,32 +406,16 @@ class KubernetesClient {
         return null;
     }
 
-    private Endpoint createEndpointFrom(Endpoint endpoint, Map<EndpointAddress, String> podToServiceName,
-                                        Map<EndpointAddress, String> podToNodeName, Map<String, String> serviceToNodePort,
-                                        Map<String, String> nodeToPublicIp) {
-        EndpointAddress pod = new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort());
-        String publicIp = nodeToPublicIp.get(podToNodeName.get(pod));
-        Integer publicPort = Integer.parseInt(serviceToNodePort.get(podToServiceName.get(pod)));
-        return new Endpoint(endpoint.getPrivateAddress(), new EndpointAddress(publicIp, publicPort), endpoint.isReady(),
-                endpoint.getAdditionalProperties());
-    }
-
-    private static Integer getPortFromPodItem(JsonValue item) {
-        JsonArray containers = toJsonArray(item.asObject().get("spec").asObject().get("containers"));
-        // If multiple containers are in one POD, then use the default Hazelcast port from the configuration.
-        if (containers.size() == 1) {
-            JsonValue container = containers.get(0);
-            JsonArray ports = toJsonArray(container.asObject().get("ports"));
-            // If multiple ports are exposed by a container, then use the default Hazelcast port from the configuration.
-            if (ports.size() == 1) {
-                JsonValue port = ports.get(0);
-                JsonValue containerPort = port.asObject().get("containerPort");
-                if (containerPort != null && containerPort.isNumber()) {
-                    return containerPort.asInt();
-                }
-            }
+    private static List<Endpoint> createEndpoints(List<Endpoint> endpoints, Map<EndpointAddress, String> nodePublicIps,
+                                                  Map<EndpointAddress, Integer> nodePorts) {
+        List<Endpoint> result = new ArrayList<Endpoint>();
+        for (Endpoint endpoint : endpoints) {
+            EndpointAddress privateAddress = endpoint.getPrivateAddress();
+            EndpointAddress publicAddress = new EndpointAddress(nodePublicIps.get(privateAddress),
+                    nodePorts.get(privateAddress));
+            result.add(new Endpoint(privateAddress, publicAddress, endpoint.isReady(), endpoint.getAdditionalProperties()));
         }
-        return null;
+        return result;
     }
 
     /**
