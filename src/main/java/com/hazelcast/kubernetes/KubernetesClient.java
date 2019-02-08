@@ -108,29 +108,29 @@ class KubernetesClient {
     String zone(String podName) {
         String podUrlString = String.format("%s/api/v1/namespaces/%s/pods/%s", kubernetesMaster, namespace, podName);
         JsonObject podJson = callGet(podUrlString);
-        String nodeName = parseNodeName(podJson);
+        String nodeName = extractNodeName(podJson);
 
         String nodeUrlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, nodeName);
         JsonObject nodeJson = callGet(nodeUrlString);
         return parseZone(nodeJson);
     }
 
-    private static List<Endpoint> parsePodsList(JsonObject json) {
+    private static List<Endpoint> parsePodsList(JsonObject podsListJson) {
         List<Endpoint> addresses = new ArrayList<Endpoint>();
 
-        for (JsonValue item : toJsonArray(json.get("items"))) {
+        for (JsonValue item : toJsonArray(podsListJson.get("items"))) {
             JsonObject status = item.asObject().get("status").asObject();
             String ip = toString(status.get("podIP"));
             if (ip != null) {
-                Integer port = getPortFromPodItem(item);
+                Integer port = extractContainerPortFrom(item);
                 addresses.add(new Endpoint(new EndpointAddress(ip, port), isReady(status)));
             }
         }
         return addresses;
     }
 
-    private static Integer getPortFromPodItem(JsonValue item) {
-        JsonArray containers = toJsonArray(item.asObject().get("spec").asObject().get("containers"));
+    private static Integer extractContainerPortFrom(JsonValue podItemJson) {
+        JsonArray containers = toJsonArray(podItemJson.asObject().get("spec").asObject().get("containers"));
         // If multiple containers are in one POD, then use the default Hazelcast port from the configuration.
         if (containers.size() == 1) {
             JsonValue container = containers.get(0);
@@ -157,21 +157,21 @@ class KubernetesClient {
         return true;
     }
 
-    private static List<Endpoint> parseEndpointsList(JsonObject json) {
+    private static List<Endpoint> parseEndpointsList(JsonObject endpointsListJson) {
         List<Endpoint> endpoints = new ArrayList<Endpoint>();
 
-        for (JsonValue item : toJsonArray(json.get("items"))) {
+        for (JsonValue item : toJsonArray(endpointsListJson.get("items"))) {
             endpoints.addAll(parseEndpoints(item));
         }
 
         return endpoints;
     }
 
-    private static List<Endpoint> parseEndpoints(JsonValue item) {
+    private static List<Endpoint> parseEndpoints(JsonValue endpointJson) {
         List<Endpoint> addresses = new ArrayList<Endpoint>();
 
-        for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
-            Integer endpointPort = parseEndpointPort(subset);
+        for (JsonValue subset : toJsonArray(endpointJson.asObject().get("subsets"))) {
+            Integer endpointPort = extractPortFrom(subset);
             for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
                 addresses.add(parseEntrypointAddress(address, endpointPort, true));
             }
@@ -182,8 +182,8 @@ class KubernetesClient {
         return addresses;
     }
 
-    private static Integer parseEndpointPort(JsonValue subset) {
-        JsonArray ports = toJsonArray(subset.asObject().get("ports"));
+    private static Integer extractPortFrom(JsonValue subsetJson) {
+        JsonArray ports = toJsonArray(subsetJson.asObject().get("ports"));
         if (ports.size() == 1) {
             JsonValue port = ports.get(0);
             return port.asObject().get("port").asInt();
@@ -193,12 +193,12 @@ class KubernetesClient {
 
     private static Endpoint parseEntrypointAddress(JsonValue endpointAddressJson, Integer endpointPort, boolean isReady) {
         String ip = endpointAddressJson.asObject().get("ip").asString();
-        Integer port = getPortFromEndpointAddress(endpointAddressJson, endpointPort);
-        Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
+        Integer port = extractServicePortFrom(endpointAddressJson, endpointPort);
+        Map<String, Object> additionalProperties = extractAdditionalPropertiesFrom(endpointAddressJson);
         return new Endpoint(new EndpointAddress(ip, port), isReady, additionalProperties);
     }
 
-    private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson, Integer endpointPort) {
+    private static Integer extractServicePortFrom(JsonValue endpointAddressJson, Integer endpointPort) {
         JsonValue servicePort = endpointAddressJson.asObject().get("hazelcast-service-port");
         if (servicePort != null && servicePort.isNumber()) {
             return servicePort.asInt();
@@ -206,7 +206,7 @@ class KubernetesClient {
         return endpointPort;
     }
 
-    private static Map<String, Object> parseAdditionalProperties(JsonValue endpointAddressJson) {
+    private static Map<String, Object> extractAdditionalPropertiesFrom(JsonValue endpointAddressJson) {
         Set<String> knownFieldNames = new HashSet<String>(
                 Arrays.asList("ip", "nodeName", "targetRef", "hostname", "hazelcast-service-port"));
 
@@ -221,8 +221,8 @@ class KubernetesClient {
         return result;
     }
 
-    private static String parseZone(JsonObject json) {
-        JsonObject labels = json.get("metadata").asObject().get("labels").asObject();
+    private static String parseZone(JsonObject nodeJson) {
+        JsonObject labels = nodeJson.get("metadata").asObject().get("labels").asObject();
         JsonValue zone = labels.get("failure-domain.kubernetes.io/zone");
         if (zone != null) {
             return toString(zone);
@@ -230,7 +230,7 @@ class KubernetesClient {
         return toString(labels.get("failure-domain.beta.kubernetes.io/zone"));
     }
 
-    private static String parseNodeName(JsonObject json) {
+    private static String extractNodeName(JsonObject json) {
         return toString(json.get("spec").asObject().get("nodeName"));
     }
 
@@ -244,9 +244,9 @@ class KubernetesClient {
             String endpointsUrl = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
             JsonObject endpointsResponse = callGet(endpointsUrl);
 
-            List<EndpointAddress> privateAddresses = extractPrivateAddresses(endpoints);
-            Map<EndpointAddress, String> services = parseServices(endpointsResponse, privateAddresses);
-            Map<EndpointAddress, String> nodes = parseNodes(endpointsResponse, privateAddresses);
+            List<EndpointAddress> privateAddresses = privateAddressesFrom(endpoints);
+            Map<EndpointAddress, String> services = extractServicesFrom(endpointsResponse, privateAddresses);
+            Map<EndpointAddress, String> nodes = extractNodesFrom(endpointsResponse, privateAddresses);
 
             Map<EndpointAddress, Integer> nodePorts = nodePortsFor(services);
             Map<EndpointAddress, String> nodePublicIps = publicIpsFor(nodes);
@@ -260,7 +260,7 @@ class KubernetesClient {
         }
     }
 
-    private static List<EndpointAddress> extractPrivateAddresses(List<Endpoint> endpoints) {
+    private static List<EndpointAddress> privateAddressesFrom(List<Endpoint> endpoints) {
         List<EndpointAddress> result = new ArrayList<EndpointAddress>();
         for (Endpoint endpoint : endpoints) {
             result.add(endpoint.getPrivateAddress());
@@ -268,11 +268,11 @@ class KubernetesClient {
         return result;
     }
 
-    private static Map<EndpointAddress, String> parseServices(JsonObject endpointsJson,
-                                                              List<EndpointAddress> privateAddresses) {
+    private static Map<EndpointAddress, String> extractServicesFrom(JsonObject endpointsListJson,
+                                                                    List<EndpointAddress> privateAddresses) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
         Set<EndpointAddress> left = new HashSet<EndpointAddress>(privateAddresses);
-        for (JsonValue item : toJsonArray(endpointsJson.get("items"))) {
+        for (JsonValue item : toJsonArray(endpointsListJson.get("items"))) {
             String service = toString(item.asObject().get("metadata").asObject().get("name"));
             List<Endpoint> endpoints = parseEndpoints(item);
             // Service must point to exactly one endpoint address, otherwise the public IP would be ambiguous.
@@ -291,10 +291,10 @@ class KubernetesClient {
         return result;
     }
 
-    private Map<EndpointAddress, String> parseNodes(JsonObject endpointsJson, List<EndpointAddress> privateAddresses) {
+    private Map<EndpointAddress, String> extractNodesFrom(JsonObject endpointsListJson, List<EndpointAddress> privateAddresses) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
         Set<EndpointAddress> left = new HashSet<EndpointAddress>(privateAddresses);
-        for (JsonValue item : toJsonArray(endpointsJson.get("items"))) {
+        for (JsonValue item : toJsonArray(endpointsListJson.get("items"))) {
             for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
                 JsonObject subsetObject = subset.asObject();
                 List<Integer> ports = new ArrayList<Integer>();
@@ -303,8 +303,8 @@ class KubernetesClient {
                 }
 
                 Map<EndpointAddress, String> nodes = new HashMap<EndpointAddress, String>();
-                nodes.putAll(parseNodesFrom(subsetObject.get("addresses"), ports));
-                nodes.putAll(parseNodesFrom(subsetObject.get("notReadyAddresses"), ports));
+                nodes.putAll(extractNodesFrom(subsetObject.get("addresses"), ports));
+                nodes.putAll(extractNodesFrom(subsetObject.get("notReadyAddresses"), ports));
                 for (EndpointAddress address : nodes.keySet()) {
                     if (privateAddresses.contains(address)) {
                         result.put(address, nodes.get(address));
@@ -320,9 +320,9 @@ class KubernetesClient {
         return result;
     }
 
-    private static Map<EndpointAddress, String> parseNodesFrom(JsonValue addresses, List<Integer> ports) {
+    private static Map<EndpointAddress, String> extractNodesFrom(JsonValue addressesJson, List<Integer> ports) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
-        for (JsonValue address : toJsonArray(addresses)) {
+        for (JsonValue address : toJsonArray(addressesJson)) {
             String ip = address.asObject().get("ip").asString();
             String nodeName = toString(address.asObject().get("nodeName"));
             for (Integer port : ports) {
@@ -341,7 +341,7 @@ class KubernetesClient {
                 result.put(privateAddress, nodePortByService.get(service));
             } else {
                 String urlString = String.format("%s/api/v1/namespaces/%s/services/%s", kubernetesMaster, namespace, service);
-                Integer nodePort = parseNodePort(callGet(urlString));
+                Integer nodePort = extractNodePort(callGet(urlString));
                 result.put(privateAddress, nodePort);
                 nodePortByService.put(service, nodePort);
             }
@@ -349,7 +349,7 @@ class KubernetesClient {
         return result;
     }
 
-    private static Integer parseNodePort(JsonObject serviceJson) {
+    private static Integer extractNodePort(JsonObject serviceJson) {
         JsonArray ports = toJsonArray(serviceJson.get("spec").asObject().get("ports"));
         if (ports.size() != 1) {
             // Service must have one and only one Node Port assigned.
@@ -367,7 +367,7 @@ class KubernetesClient {
                 result.put(privateAddress, publicIpByNode.get(node));
             } else {
                 String urlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, node);
-                String publicIp = parsePublicIp(callGet(urlString));
+                String publicIp = extractPublicIpFrom(callGet(urlString));
                 result.put(privateAddress, publicIp);
                 publicIpByNode.put(node, publicIp);
             }
@@ -375,7 +375,7 @@ class KubernetesClient {
         return result;
     }
 
-    private static String parsePublicIp(JsonObject nodeJson) {
+    private static String extractPublicIpFrom(JsonObject nodeJson) {
         for (JsonValue address : toJsonArray(nodeJson.get("status").asObject().get("addresses"))) {
             if ("ExternalIP".equals(address.asObject().get("type").asString())) {
                 return address.asObject().get("address").asString();
