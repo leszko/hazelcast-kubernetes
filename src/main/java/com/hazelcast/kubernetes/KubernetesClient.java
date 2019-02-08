@@ -92,7 +92,7 @@ class KubernetesClient {
      */
     List<Endpoint> endpointsByName(String endpointName) {
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
-        return enrichPublicAddresses(parseEndpoint(callGet(urlString)));
+        return enrichPublicAddresses(parseEndpoints(callGet(urlString)));
     }
 
     /**
@@ -158,26 +158,25 @@ class KubernetesClient {
     }
 
     private static List<Endpoint> parseEndpointsList(JsonObject json) {
-        List<Endpoint> addresses = new ArrayList<Endpoint>();
+        List<Endpoint> endpoints = new ArrayList<Endpoint>();
 
-        for (JsonValue object : toJsonArray(json.get("items"))) {
-            List<Endpoint> endpoints = parseEndpoint(object);
-            addresses.addAll(endpoints);
+        for (JsonValue item : toJsonArray(json.get("items"))) {
+            endpoints.addAll(parseEndpoints(item));
         }
 
-        return addresses;
+        return endpoints;
     }
 
-    private static List<Endpoint> parseEndpoint(JsonValue endpointsJson) {
+    private static List<Endpoint> parseEndpoints(JsonValue item) {
         List<Endpoint> addresses = new ArrayList<Endpoint>();
 
-        for (JsonValue subset : toJsonArray(endpointsJson.asObject().get("subsets"))) {
+        for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
             Integer endpointPort = parseEndpointPort(subset);
             for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
                 addresses.add(parseEntrypointAddress(address, endpointPort, true));
             }
-            for (JsonValue notReadyAddress : toJsonArray(subset.asObject().get("notReadyAddresses"))) {
-                addresses.add(parseEntrypointAddress(notReadyAddress, endpointPort, false));
+            for (JsonValue address : toJsonArray(subset.asObject().get("notReadyAddresses"))) {
+                addresses.add(parseEntrypointAddress(address, endpointPort, false));
             }
         }
         return addresses;
@@ -269,48 +268,25 @@ class KubernetesClient {
         return result;
     }
 
-    private static Map<EndpointAddress, String> parseServices(JsonObject json, List<EndpointAddress> pods) {
+    private static Map<EndpointAddress, String> parseServices(JsonObject endpointsJson,
+                                                              List<EndpointAddress> privateAddresses) {
         Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
-        Set<EndpointAddress> left = new HashSet<EndpointAddress>(pods);
-        for (JsonValue item : toJsonArray(json.get("items"))) {
-            String serviceName = item.asObject().get("metadata").asObject().get("name").asString();
-            List<EndpointAddress> parsedPods = parsePods(item);
-            if (parsedPods.size() == 1) {
-                EndpointAddress pod = parsedPods.get(0);
-                if (pods.contains(pod)) {
-                    String currentServiceName = result.get(pod);
-                    if (currentServiceName == null || serviceName.length() > currentServiceName.length()) {
-                        result.put(pod, serviceName);
-                        left.remove(pod);
-                    }
+        Set<EndpointAddress> left = new HashSet<EndpointAddress>(privateAddresses);
+        for (JsonValue item : toJsonArray(endpointsJson.get("items"))) {
+            String service = toString(item.asObject().get("metadata").asObject().get("name"));
+            List<Endpoint> endpoints = parseEndpoints(item);
+            // Service must point to exactly one endpoint address, otherwise the public IP would be ambiguous.
+            if (endpoints.size() == 1) {
+                EndpointAddress address = endpoints.get(0).getPrivateAddress();
+                if (left.contains(address)) {
+                    result.put(address, service);
+                    left.remove(address);
                 }
             }
         }
         if (!left.isEmpty()) {
-            throw new RuntimeException("!!!!");
-        }
-        return result;
-    }
-
-    private static List<EndpointAddress> parsePods(JsonValue item) {
-        List<EndpointAddress> result = new ArrayList<EndpointAddress>();
-        for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
-            List<String> ips = new ArrayList<String>();
-            for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
-                ips.add(address.asObject().get("ip").asString());
-            }
-            for (JsonValue address : toJsonArray(subset.asObject().get("notReadyAddresses"))) {
-                ips.add(address.asObject().get("ip").asString());
-            }
-            List<Integer> ports = new ArrayList<Integer>();
-            for (JsonValue port : toJsonArray(subset.asObject().get("ports"))) {
-                ports.add(new Integer(port.asObject().get("port").asInt()));
-            }
-            for (String ip : ips) {
-                for (Integer port : ports) {
-                    result.add(new EndpointAddress(ip, port));
-                }
-            }
+            // At least one Hazelcast Member POD does not have a corresponding service.
+            throw new KubernetesClientException(String.format("Cannot fetch services dedicated to the following PODs: %s", left));
         }
         return result;
     }
@@ -547,6 +523,11 @@ class KubernetesClient {
             int result = ip != null ? ip.hashCode() : 0;
             result = 31 * result + (port != null ? port.hashCode() : 0);
             return result;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%s:%s", ip, port);
         }
     }
 }
