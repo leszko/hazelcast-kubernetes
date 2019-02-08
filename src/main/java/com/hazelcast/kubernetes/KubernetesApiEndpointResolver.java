@@ -34,19 +34,17 @@ class KubernetesApiEndpointResolver
     private final String serviceName;
     private final String serviceLabel;
     private final String serviceLabelValue;
-    private final String namespace;
     private final Boolean resolveNotReadyAddresses;
     private final int port;
     private final KubernetesClient client;
 
     KubernetesApiEndpointResolver(ILogger logger, String serviceName, int port, String serviceLabel, String serviceLabelValue,
-                                  String namespace, Boolean resolveNotReadyAddresses, KubernetesClient client) {
+                                  Boolean resolveNotReadyAddresses, KubernetesClient client) {
 
         super(logger);
 
         this.serviceName = serviceName;
         this.port = port;
-        this.namespace = namespace;
         this.serviceLabel = serviceLabel;
         this.serviceLabelValue = serviceLabelValue;
         this.resolveNotReadyAddresses = resolveNotReadyAddresses;
@@ -56,11 +54,11 @@ class KubernetesApiEndpointResolver
     @Override
     List<DiscoveryNode> resolve() {
         if (serviceName != null && !serviceName.isEmpty()) {
-            return getSimpleDiscoveryNodes(client.endpointsByName(namespace, serviceName));
+            return getSimpleDiscoveryNodes(client.endpointsByName(serviceName));
         } else if (serviceLabel != null && !serviceLabel.isEmpty()) {
-            return getSimpleDiscoveryNodes(client.endpointsByLabel(namespace, serviceLabel, serviceLabelValue));
+            return getSimpleDiscoveryNodes(client.endpointsByLabel(serviceLabel, serviceLabelValue));
         }
-        return getSimpleDiscoveryNodes(client.endpoints(namespace));
+        return getSimpleDiscoveryNodes(client.endpoints());
     }
 
     private List<DiscoveryNode> getSimpleDiscoveryNodes(Endpoints endpoints) {
@@ -85,7 +83,7 @@ class KubernetesApiEndpointResolver
     private void addAddress(List<DiscoveryNode> discoveredNodes, Endpoint endpoint) {
         Address address = createAddress(endpoint.getPrivateAddress());
         Address publicAddress = createAddress(endpoint.getPublicAddress());
-        discoveredNodes.add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getAdditionalProperties()));
+        discoveredNodes.add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getPrivateAddress().getAdditionalProperties()));
         if (logger.isFinestEnabled()) {
             logger.finest("Found node service with address: " + address);
         }

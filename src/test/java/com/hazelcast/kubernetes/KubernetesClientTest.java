@@ -81,7 +81,7 @@ public class KubernetesClientTest {
     @Before
     public void setUp() {
         String kubernetesMasterUrl = String.format("http://%s:%d", KUBERNETES_MASTER_IP, wireMockRule.port());
-        kubernetesClient = new KubernetesClient(kubernetesMasterUrl, TOKEN, CA_CERTIFICATE);
+        kubernetesClient = new KubernetesClient(NAMESPACE, kubernetesMasterUrl, TOKEN, CA_CERTIFICATE);
         stubFor(get(urlMatching("/api/.*")).atPriority(5).willReturn(aResponse().withStatus(401)));
     }
 
@@ -93,7 +93,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(podsListBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpoints(NAMESPACE);
+        Endpoints result = kubernetesClient.endpoints();
 
         // then
         assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
@@ -127,7 +127,7 @@ public class KubernetesClientTest {
                                        .withBody(serviceBodyPublicIp(NOT_READY_SERVICE_NAME, NOT_READY_PUBLIC_PORT.toString()))));
 
         // when
-        Endpoints result = kubernetesClient.endpoints(NAMESPACE);
+        Endpoints result = kubernetesClient.endpoints();
 
         // then
         assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
@@ -147,7 +147,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpointsByLabel(NAMESPACE, serviceLabel, serviceLabelValue);
+        Endpoints result = kubernetesClient.endpointsByLabel(serviceLabel, serviceLabelValue);
 
         // then
         assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
@@ -164,7 +164,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(endpointsBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpointsByName(NAMESPACE, serviceName);
+        Endpoints result = kubernetesClient.endpointsByName(serviceName);
 
         // then
         assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
@@ -182,7 +182,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(nodeBetaBody())));
 
         // when
-        String zone = kubernetesClient.zone(NAMESPACE, POD_NAME_1);
+        String zone = kubernetesClient.zone(POD_NAME_1);
 
         // then
         assertEquals(ZONE, zone);
@@ -200,7 +200,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(nodeBody())));
 
         // when
-        String zone = kubernetesClient.zone(NAMESPACE, POD_NAME_1);
+        String zone = kubernetesClient.zone(POD_NAME_1);
 
         // then
         assertEquals(ZONE, zone);
@@ -219,7 +219,7 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(501).withBody(forbiddenBody())));
 
         // when
-        kubernetesClient.endpoints(NAMESPACE);
+        kubernetesClient.endpoints();
     }
 
     @Test(expected = KubernetesClientException.class)
@@ -230,21 +230,21 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(malformedBody())));
 
         // when
-        kubernetesClient.endpoints(NAMESPACE);
+        kubernetesClient.endpoints();
     }
 
     @Test(expected = KubernetesClientException.class)
     public void nullToken() {
         // given
         String kubernetesMasterUrl = String.format("http://%s:%d", KUBERNETES_MASTER_IP, wireMockRule.port());
-        KubernetesClient kubernetesClient = new KubernetesClient(kubernetesMasterUrl, TOKEN, null);
+        KubernetesClient kubernetesClient = new KubernetesClient(NAMESPACE, kubernetesMasterUrl, TOKEN, null);
 
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/pods", NAMESPACE)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
                 .willReturn(aResponse().withStatus(200).withBody(malformedBody())));
 
         // when
-        kubernetesClient.endpoints(NAMESPACE);
+        kubernetesClient.endpoints();
     }
 
     /**

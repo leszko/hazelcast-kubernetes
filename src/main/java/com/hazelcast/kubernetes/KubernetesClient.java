@@ -36,46 +36,43 @@ import static java.util.Collections.EMPTY_MAP;
 
 /**
  * Responsible for connecting to the Kubernetes API.
- * <p>
- * Note: This client should always be used from inside Kubernetes since it depends on the CA Cert file, which exists
- * in the POD filesystem.
  *
  * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/">Kubernetes API</a>
  */
 class KubernetesClient {
-    private static final int HTTP_OK = 200;
-
     private static final int RETRIES = 1;
     private static final List<String> NON_RETRYABLE_KEYWORDS = Arrays.asList("\"reason\":\"Forbidden\"");
 
+    private final String namespace;
     private final String kubernetesMaster;
     private final String apiToken;
     private final String caCertificate;
 
-    KubernetesClient(String kubernetesMaster, String apiToken, String caCertificate) {
+    KubernetesClient(String namespace, String kubernetesMaster, String apiToken, String caCertificate) {
+        this.namespace = namespace;
         this.kubernetesMaster = kubernetesMaster;
         this.apiToken = apiToken;
         this.caCertificate = caCertificate;
     }
 
-    public Endpoints endpoints(String namespace) {
+    public Endpoints endpoints() {
         String urlString = String.format("%s/api/v1/namespaces/%s/pods", kubernetesMaster, namespace);
-        return enrichWithPublicAddress(namespace, parsePodsList(callGet(urlString)));
+        return enrichWithPublicAddress(parsePodsList(callGet(urlString)));
 
     }
 
-    public Endpoints endpointsByLabel(String namespace, String serviceLabel, String serviceLabelValue) {
+    public Endpoints endpointsByLabel(String serviceLabel, String serviceLabelValue) {
         String param = String.format("labelSelector=%s=%s", serviceLabel, serviceLabelValue);
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints?%s", kubernetesMaster, namespace, param);
-        return enrichWithPublicAddress(namespace, parseEndpointsList(callGet(urlString)));
+        return enrichWithPublicAddress(parseEndpointsList(callGet(urlString)));
     }
 
-    public Endpoints endpointsByName(String namespace, String endpointName) {
+    public Endpoints endpointsByName(String endpointName) {
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
-        return enrichWithPublicAddress(namespace, parseEndpoint(callGet(urlString)));
+        return enrichWithPublicAddress(parseEndpoint(callGet(urlString)));
     }
 
-    public String zone(String namespace, String podName) {
+    public String zone(String podName) {
         String podUrlString = String.format("%s/api/v1/namespaces/%s/pods/%s", kubernetesMaster, namespace, podName);
         JsonObject podJson = callGet(podUrlString);
         String nodeName = parseNodeName(podJson);
@@ -85,16 +82,16 @@ class KubernetesClient {
         return parseZone(nodeJson);
     }
 
-    private Endpoints enrichWithPublicAddress(String namespace, Endpoints endpoints) {
+    private Endpoints enrichWithPublicAddress(Endpoints endpoints) {
         try {
-            List<PodIpPort> pods = extractPodsFrom(endpoints);
+            List<EndpointAddress> pods = extractPodsFrom(endpoints);
 
             String urlString = String.format("%s/api/v1/namespaces/%s/endpoints", kubernetesMaster, namespace);
             JsonObject endpointsResult = callGet(urlString);
 
-            Map<PodIpPort, String> podToServiceName = parsePodToServiceName(endpointsResult, pods);
-            Map<PodIpPort, String> podToNodeName = parseEndpointsToNodeName(endpointsResult, pods);
-            Map<String, String> serviceToNodePort = fetchNodePortFor(namespace, podToServiceName.values());
+            Map<EndpointAddress, String> podToServiceName = parsePodToServiceName(endpointsResult, pods);
+            Map<EndpointAddress, String> podToNodeName = parseEndpointsToNodeName(endpointsResult, pods);
+            Map<String, String> serviceToNodePort = fetchNodePortFor(podToServiceName.values());
             Map<String, String> nodeToPublicIp = fetchPublicIpFor(podToNodeName.values());
 
             List<Endpoint> addresses = new ArrayList<Endpoint>();
@@ -114,25 +111,25 @@ class KubernetesClient {
         }
     }
 
-    private static List<PodIpPort> extractPodsFrom(Endpoints endpoints) {
-        List<PodIpPort> result = new ArrayList<PodIpPort>();
+    private static List<EndpointAddress> extractPodsFrom(Endpoints endpoints) {
+        List<EndpointAddress> result = new ArrayList<EndpointAddress>();
         for (Endpoint endpoint : endpoints.getAddresses()) {
-            result.add(new PodIpPort(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort()));
+            result.add(new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort()));
         }
         for (Endpoint endpoint : endpoints.getNotReadyAddresses()) {
-            result.add(new PodIpPort(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort()));
+            result.add(new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort()));
         }
         return result;
     }
 
-    private static Map<PodIpPort, String> parsePodToServiceName(JsonObject json, List<PodIpPort> pods) {
-        Map<PodIpPort, String> result = new HashMap<PodIpPort, String>();
-        Set<PodIpPort> left = new HashSet<PodIpPort>(pods);
+    private static Map<EndpointAddress, String> parsePodToServiceName(JsonObject json, List<EndpointAddress> pods) {
+        Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
+        Set<EndpointAddress> left = new HashSet<EndpointAddress>(pods);
         for (JsonValue item : toJsonArray(json.get("items"))) {
             String serviceName = item.asObject().get("metadata").asObject().get("name").asString();
-            List<PodIpPort> parsedPods = parsePods(item);
+            List<EndpointAddress> parsedPods = parsePods(item);
             if (parsedPods.size() == 1) {
-                PodIpPort pod = parsedPods.get(0);
+                EndpointAddress pod = parsedPods.get(0);
                 if (pods.contains(pod)) {
                     String currentServiceName = result.get(pod);
                     if (currentServiceName == null || serviceName.length() > currentServiceName.length()) {
@@ -148,8 +145,8 @@ class KubernetesClient {
         return result;
     }
 
-    private static List<PodIpPort> parsePods(JsonValue item) {
-        List<PodIpPort> result = new ArrayList<PodIpPort>();
+    private static List<EndpointAddress> parsePods(JsonValue item) {
+        List<EndpointAddress> result = new ArrayList<EndpointAddress>();
         for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
             List<String> ips = new ArrayList<String>();
             for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
@@ -164,16 +161,16 @@ class KubernetesClient {
             }
             for (String ip : ips) {
                 for (Integer port : ports) {
-                    result.add(new PodIpPort(ip, port));
+                    result.add(new EndpointAddress(ip, port));
                 }
             }
         }
         return result;
     }
 
-    private Map<PodIpPort, String> parseEndpointsToNodeName(JsonObject json, List<PodIpPort> pods) {
-        Map<PodIpPort, String> result = new HashMap<PodIpPort, String>();
-        Set<PodIpPort> left = new HashSet<PodIpPort>(pods);
+    private Map<EndpointAddress, String> parseEndpointsToNodeName(JsonObject json, List<EndpointAddress> pods) {
+        Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
+        Set<EndpointAddress> left = new HashSet<EndpointAddress>(pods);
         for (JsonValue item : toJsonArray(json.get("items"))) {
             for (JsonValue subset : toJsonArray(item.asObject().get("subsets"))) {
                 List<Integer> ports = new ArrayList<Integer>();
@@ -184,7 +181,7 @@ class KubernetesClient {
                     String ip = address.asObject().get("ip").asString();
                     String nodeName = toString(address.asObject().get("nodeName"));
                     for (Integer port : ports) {
-                        PodIpPort pod = new PodIpPort(ip, port);
+                        EndpointAddress pod = new EndpointAddress(ip, port);
                         if (pods.contains(pod)) {
                             result.put(pod, nodeName);
                             left.remove(pod);
@@ -195,7 +192,7 @@ class KubernetesClient {
                     String ip = address.asObject().get("ip").asString();
                     String nodeName = toString(address.asObject().get("nodeName"));
                     for (Integer port : ports) {
-                        PodIpPort pod = new PodIpPort(ip, port);
+                        EndpointAddress pod = new EndpointAddress(ip, port);
                         if (pods.contains(pod)) {
                             result.put(pod, nodeName);
                             left.remove(pod);
@@ -210,7 +207,7 @@ class KubernetesClient {
         return result;
     }
 
-    private Map<String, String> fetchNodePortFor(String namespace, Collection<String> serviceNames) {
+    private Map<String, String> fetchNodePortFor(Collection<String> serviceNames) {
         Map<String, String> result = new HashMap<String, String>();
         for (String serviceName : serviceNames) {
             if (!result.containsKey(serviceName)) {
@@ -250,64 +247,13 @@ class KubernetesClient {
         return null;
     }
 
-    private Endpoint createEndpointFrom(Endpoint endpoint, Map<PodIpPort, String> podToServiceName,
-                                        Map<PodIpPort, String> podToNodeName, Map<String, String> serviceToNodePort,
+    private Endpoint createEndpointFrom(Endpoint endpoint, Map<EndpointAddress, String> podToServiceName,
+                                        Map<EndpointAddress, String> podToNodeName, Map<String, String> serviceToNodePort,
                                         Map<String, String> nodeToPublicIp) {
-        PodIpPort pod = new PodIpPort(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort());
+        EndpointAddress pod = new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort());
         String publicIp = nodeToPublicIp.get(podToNodeName.get(pod));
         Integer publicPort = Integer.parseInt(serviceToNodePort.get(podToServiceName.get(pod)));
-        return new Endpoint(endpoint.getPrivateAddress(), new EndpointAddress(publicIp, publicPort),
-                endpoint.getAdditionalProperties());
-    }
-
-    private static class PodIpPort {
-        private final String ip;
-        private final Integer port;
-
-        public PodIpPort(String ip, Integer port) {
-            this.ip = ip;
-            this.port = port;
-        }
-
-        public String getIp() {
-            return ip;
-        }
-
-        public Integer getPort() {
-            return port;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-
-            PodIpPort podIpPort = (PodIpPort) o;
-
-            if (ip != null ? !ip.equals(podIpPort.ip) : podIpPort.ip != null) {
-                return false;
-            }
-            return port != null ? port.equals(podIpPort.port) : podIpPort.port == null;
-        }
-
-        @Override
-        public int hashCode() {
-            int result = ip != null ? ip.hashCode() : 0;
-            result = 31 * result + (port != null ? port.hashCode() : 0);
-            return result;
-        }
-
-        @Override
-        public String toString() {
-            return "PodIpPort{" +
-                    "ip='" + ip + '\'' +
-                    ", port=" + port +
-                    '}';
-        }
+        return new Endpoint(endpoint.getPrivateAddress(), new EndpointAddress(publicIp, publicPort));
     }
 
     private JsonObject callGet(final String urlString) {
@@ -336,7 +282,7 @@ class KubernetesClient {
             String ip = toString(status.get("podIP"));
             if (ip != null) {
                 Integer port = getPortFromPodItem(item);
-                Endpoint address = new Endpoint(new EndpointAddress(ip, port), EMPTY_MAP);
+                Endpoint address = new Endpoint(new EndpointAddress(ip, port));
 
                 if (isReady(status)) {
                     addresses.add(address);
@@ -419,7 +365,7 @@ class KubernetesClient {
         String ip = endpointAddressJson.asObject().get("ip").asString();
         Integer port = getPortFromEndpointAddress(endpointAddressJson, endpointPort);
         Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
-        return new Endpoint(new EndpointAddress(ip, port), additionalProperties);
+        return new Endpoint(new EndpointAddress(ip, port, additionalProperties));
     }
 
     private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson, Integer endpointPort) {
@@ -503,48 +449,53 @@ class KubernetesClient {
     final static class Endpoint {
         private final EndpointAddress privateAddress;
         private final EndpointAddress publicAddress;
-        private final Map<String, Object> additionalProperties;
 
-        Endpoint(EndpointAddress privateAddress, Map<String, Object> additionalProperties) {
+        Endpoint(EndpointAddress privateAddress) {
             this.privateAddress = privateAddress;
             this.publicAddress = null;
-            this.additionalProperties = additionalProperties;
         }
 
-        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, Map<String, Object> additionalProperties) {
+        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress) {
             this.privateAddress = privateAddress;
             this.publicAddress = publicAddress;
-            this.additionalProperties = additionalProperties;
         }
 
-        public EndpointAddress getPublicAddress() {
+        EndpointAddress getPublicAddress() {
             return publicAddress;
         }
 
-        public EndpointAddress getPrivateAddress() {
+        EndpointAddress getPrivateAddress() {
             return privateAddress;
-        }
-
-        Map<String, Object> getAdditionalProperties() {
-            return additionalProperties;
         }
     }
 
     final static class EndpointAddress {
         private final String ip;
         private final Integer port;
+        private final Map<String, Object> additionalProperties;
 
-        public EndpointAddress(String ip, Integer port) {
+        EndpointAddress(String ip, Integer port, Map<String, Object> additionalProperties) {
             this.ip = ip;
             this.port = port;
+            this.additionalProperties = additionalProperties;
         }
 
-        public String getIp() {
+        EndpointAddress(String ip, Integer port) {
+            this.ip = ip;
+            this.port = port;
+            this.additionalProperties = EMPTY_MAP;
+        }
+
+        String getIp() {
             return ip;
         }
 
-        public Integer getPort() {
+        Integer getPort() {
             return port;
+        }
+
+        Map<String, Object> getAdditionalProperties() {
+            return additionalProperties;
         }
 
         @Override
@@ -556,18 +507,23 @@ class KubernetesClient {
                 return false;
             }
 
-            EndpointAddress that = (EndpointAddress) o;
+            EndpointAddress address = (EndpointAddress) o;
 
-            if (ip != null ? !ip.equals(that.ip) : that.ip != null) {
+            if (ip != null ? !ip.equals(address.ip) : address.ip != null) {
                 return false;
             }
-            return port != null ? port.equals(that.port) : that.port == null;
+            if (port != null ? !port.equals(address.port) : address.port != null) {
+                return false;
+            }
+            return additionalProperties != null ? additionalProperties.equals(address.additionalProperties) :
+                    address.additionalProperties == null;
         }
 
         @Override
         public int hashCode() {
             int result = ip != null ? ip.hashCode() : 0;
             result = 31 * result + (port != null ? port.hashCode() : 0);
+            result = 31 * result + (additionalProperties != null ? additionalProperties.hashCode() : 0);
             return result;
         }
     }

@@ -16,8 +16,8 @@
 
 package com.hazelcast.kubernetes;
 
-import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
 import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
+import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.NoLogFactory;
 import com.hazelcast.spi.discovery.DiscoveryNode;
@@ -30,7 +30,6 @@ import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 
 import static java.util.Arrays.asList;
@@ -61,10 +60,9 @@ public class KubernetesApiEndpointResolverTest {
         // given
         Endpoints endpoints = new Endpoints(Collections.<Endpoint>emptyList(),
                 Collections.<Endpoint>emptyList());
-        given(client.endpoints(NAMESPACE)).willReturn(endpoints);
+        given(client.endpoints()).willReturn(endpoints);
 
-        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, null, 0, null, null, NAMESPACE, null,
-                client);
+        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, null, 0, null, null, null, client);
 
         // when
         List<DiscoveryNode> nodes = sut.resolve();
@@ -86,10 +84,10 @@ public class KubernetesApiEndpointResolverTest {
     private void resolveWithServiceNameWhenNodeInNamespace(final int port, final int expectedPort) {
         // given
         Endpoints endpoints = createEndpoints(1);
-        given(client.endpointsByName(NAMESPACE, SERVICE_NAME)).willReturn(endpoints);
+        given(client.endpointsByName(SERVICE_NAME)).willReturn(endpoints);
 
-        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, port, null, null, NAMESPACE,
-                null, client);
+        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, port, null, null, null,
+                client);
 
         // when
         List<DiscoveryNode> nodes = sut.resolve();
@@ -103,10 +101,10 @@ public class KubernetesApiEndpointResolverTest {
     public void resolveWithServiceLabelWhenNodeWithServiceLabel() {
         // given
         Endpoints endpoints = createEndpoints(2);
-        given(client.endpointsByLabel(NAMESPACE, SERVICE_LABEL, SERVICE_LABEL_VALUE)).willReturn(endpoints);
+        given(client.endpointsByLabel(SERVICE_LABEL, SERVICE_LABEL_VALUE)).willReturn(endpoints);
 
         KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, null, 0, SERVICE_LABEL, SERVICE_LABEL_VALUE,
-                NAMESPACE, null, client);
+                null, client);
 
         // when
         List<DiscoveryNode> nodes = sut.resolve();
@@ -120,9 +118,9 @@ public class KubernetesApiEndpointResolverTest {
     public void resolveWithServiceNameWhenNotReadyAddressesAndNotReadyEnabled() {
         // given
         Endpoints endpoints = createNotReadyEndpoints(2);
-        given(client.endpointsByName(NAMESPACE, SERVICE_NAME)).willReturn(endpoints);
+        given(client.endpointsByName(SERVICE_NAME)).willReturn(endpoints);
 
-        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, 0, null, null, NAMESPACE,
+        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, 0, null, null,
                 RESOLVE_NOT_READY_ADDRESSES, client);
 
         // when
@@ -136,10 +134,9 @@ public class KubernetesApiEndpointResolverTest {
     public void resolveWithServiceNameWhenNotReadyAddressesAndNotReadyDisabled() {
         // given
         Endpoints endpoints = createNotReadyEndpoints(2);
-        given(client.endpointsByName(NAMESPACE, SERVICE_NAME)).willReturn(endpoints);
+        given(client.endpointsByName(SERVICE_NAME)).willReturn(endpoints);
 
-        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, 0, null, null, NAMESPACE,
-                null,
+        KubernetesApiEndpointResolver sut = new KubernetesApiEndpointResolver(LOGGER, SERVICE_NAME, 0, null, null, null,
                 client);
 
         // when
@@ -159,6 +156,6 @@ public class KubernetesApiEndpointResolverTest {
 
     private static Endpoint createEntrypointAddress(int customPort) {
         String ip = "1.1.1.1";
-        return new Endpoint(new KubernetesClient.EndpointAddress(ip, customPort), new HashMap<String, Object>());
+        return new Endpoint(new KubernetesClient.EndpointAddress(ip, customPort));
     }
 }
