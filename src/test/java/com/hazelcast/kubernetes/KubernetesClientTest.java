@@ -2501,7 +2501,7 @@ public class KubernetesClientTest {
         for (Endpoint address : addresses) {
             String ip = address.getPrivateAddress().getIp();
             Integer port = address.getPrivateAddress().getPort();
-            boolean isReady = address.getPrivateAddress().isReady();
+            boolean isReady = address.isReady();
             result.add(toString(ip, port, isReady));
         }
         return result;
@@ -2516,7 +2516,7 @@ public class KubernetesClientTest {
         for (Endpoint address : addresses) {
             String ip = address.getPublicAddress().getIp();
             Integer port = address.getPublicAddress().getPort();
-            boolean isReady = address.getPublicAddress().isReady();
+            boolean isReady = address.isReady();
             result.add(toString(ip, port, isReady));
         }
         return result;

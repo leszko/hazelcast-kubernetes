@@ -79,11 +79,11 @@ class KubernetesApiEndpointResolver
     }
 
     private void addAddress(List<DiscoveryNode> discoveredNodes, Endpoint endpoint) {
-        if (Boolean.TRUE.equals(resolveNotReadyAddresses) || endpoint.getPrivateAddress().isReady()) {
+        if (Boolean.TRUE.equals(resolveNotReadyAddresses) || endpoint.isReady()) {
             Address address = createAddress(endpoint.getPrivateAddress());
             Address publicAddress = createAddress(endpoint.getPublicAddress());
             discoveredNodes
-                    .add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getPrivateAddress().getAdditionalProperties()));
+                    .add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getAdditionalProperties()));
             if (logger.isFinestEnabled()) {
                 logger.finest("Found node service with address: " + address);
             }

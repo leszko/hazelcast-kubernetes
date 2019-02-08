@@ -55,24 +55,24 @@ class KubernetesClient {
         this.caCertificate = caCertificate;
     }
 
-    public List<Endpoint> endpoints() {
+    List<Endpoint> endpoints() {
         String urlString = String.format("%s/api/v1/namespaces/%s/pods", kubernetesMaster, namespace);
         return enrichWithPublicAddress(parsePodsList(callGet(urlString)));
 
     }
 
-    public List<Endpoint> endpointsByLabel(String serviceLabel, String serviceLabelValue) {
+    List<Endpoint> endpointsByLabel(String serviceLabel, String serviceLabelValue) {
         String param = String.format("labelSelector=%s=%s", serviceLabel, serviceLabelValue);
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints?%s", kubernetesMaster, namespace, param);
         return enrichWithPublicAddress(parseEndpointsList(callGet(urlString)));
     }
 
-    public List<Endpoint> endpointsByName(String endpointName) {
+    List<Endpoint> endpointsByName(String endpointName) {
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
         return enrichWithPublicAddress(parseEndpoint(callGet(urlString)));
     }
 
-    public String zone(String podName) {
+    String zone(String podName) {
         String podUrlString = String.format("%s/api/v1/namespaces/%s/pods/%s", kubernetesMaster, namespace, podName);
         JsonObject podJson = callGet(podUrlString);
         String nodeName = parseNodeName(podJson);
@@ -272,7 +272,7 @@ class KubernetesClient {
             String ip = toString(status.get("podIP"));
             if (ip != null) {
                 Integer port = getPortFromPodItem(item);
-                addresses.add(new Endpoint(new EndpointAddress(ip, port, isReady(status))));
+                addresses.add(new Endpoint(new EndpointAddress(ip, port), isReady(status)));
             }
         }
 
@@ -348,7 +348,7 @@ class KubernetesClient {
         String ip = endpointAddressJson.asObject().get("ip").asString();
         Integer port = getPortFromEndpointAddress(endpointAddressJson, endpointPort);
         Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
-        return new Endpoint(new EndpointAddress(ip, port, isReady, additionalProperties));
+        return new Endpoint(new EndpointAddress(ip, port), isReady, additionalProperties);
     }
 
     private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson, Integer endpointPort) {
@@ -411,15 +411,50 @@ class KubernetesClient {
     final static class Endpoint {
         private final EndpointAddress privateAddress;
         private final EndpointAddress publicAddress;
+        private final boolean isReady;
+        private final Map<String, Object> additionalProperties;
 
         Endpoint(EndpointAddress privateAddress) {
             this.privateAddress = privateAddress;
             this.publicAddress = null;
+            this.isReady = true;
+            this.additionalProperties = EMPTY_MAP;
+        }
+
+        Endpoint(EndpointAddress privateAddress, boolean isReady) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = null;
+            this.isReady = isReady;
+            this.additionalProperties = EMPTY_MAP;
+        }
+
+        Endpoint(EndpointAddress privateAddress, boolean isReady, Map<String, Object> additionalProperties) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = null;
+            this.isReady = isReady;
+            this.additionalProperties = additionalProperties;
         }
 
         Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress) {
             this.privateAddress = privateAddress;
             this.publicAddress = publicAddress;
+            this.isReady = true;
+            this.additionalProperties = EMPTY_MAP;
+        }
+
+        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, boolean isReady) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = publicAddress;
+            this.isReady = isReady;
+            this.additionalProperties = EMPTY_MAP;
+        }
+
+        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, boolean isReady,
+                 Map<String, Object> additionalProperties) {
+            this.privateAddress = privateAddress;
+            this.publicAddress = publicAddress;
+            this.isReady = isReady;
+            this.additionalProperties = additionalProperties;
         }
 
         EndpointAddress getPublicAddress() {
@@ -429,33 +464,23 @@ class KubernetesClient {
         EndpointAddress getPrivateAddress() {
             return privateAddress;
         }
+
+        public boolean isReady() {
+            return isReady;
+        }
+
+        public Map<String, Object> getAdditionalProperties() {
+            return additionalProperties;
+        }
     }
 
     final static class EndpointAddress {
         private final String ip;
         private final Integer port;
-        private final boolean isReady;
-        private final Map<String, Object> additionalProperties;
-
-        EndpointAddress(String ip, Integer port, boolean isReady, Map<String, Object> additionalProperties) {
-            this.ip = ip;
-            this.port = port;
-            this.isReady = isReady;
-            this.additionalProperties = additionalProperties;
-        }
-
-        EndpointAddress(String ip, Integer port, boolean isReady) {
-            this.ip = ip;
-            this.port = port;
-            this.isReady = isReady;
-            this.additionalProperties = EMPTY_MAP;
-        }
 
         EndpointAddress(String ip, Integer port) {
             this.ip = ip;
             this.port = port;
-            this.isReady = true;
-            this.additionalProperties = EMPTY_MAP;
         }
 
         String getIp() {
@@ -464,14 +489,6 @@ class KubernetesClient {
 
         Integer getPort() {
             return port;
-        }
-
-        public boolean isReady() {
-            return isReady;
-        }
-
-        Map<String, Object> getAdditionalProperties() {
-            return additionalProperties;
         }
 
         @Override
@@ -488,18 +505,13 @@ class KubernetesClient {
             if (ip != null ? !ip.equals(address.ip) : address.ip != null) {
                 return false;
             }
-            if (port != null ? !port.equals(address.port) : address.port != null) {
-                return false;
-            }
-            return additionalProperties != null ? additionalProperties.equals(address.additionalProperties) :
-                    address.additionalProperties == null;
+            return port != null ? port.equals(address.port) : address.port == null;
         }
 
         @Override
         public int hashCode() {
             int result = ip != null ? ip.hashCode() : 0;
             result = 31 * result + (port != null ? port.hashCode() : 0);
-            result = 31 * result + (additionalProperties != null ? additionalProperties.hashCode() : 0);
             return result;
         }
     }

@@ -153,6 +153,6 @@ public class KubernetesApiEndpointResolverTest {
 
     private static Endpoint createEntrypointAddress(int customPort, boolean isReady) {
         String ip = "1.1.1.1";
-        return new Endpoint(new KubernetesClient.EndpointAddress(ip, customPort, isReady));
+        return new Endpoint(new KubernetesClient.EndpointAddress(ip, customPort), isReady);
     }
 }
