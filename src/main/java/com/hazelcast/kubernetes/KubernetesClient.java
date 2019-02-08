@@ -55,23 +55,54 @@ class KubernetesClient {
         this.caCertificate = caCertificate;
     }
 
+    /**
+     * Retrieves POD addresses in the specified {@code namespace}.
+     *
+     * @return all POD addresses
+     * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#list-143">Kubernetes Endpoint API</a>
+     */
     List<Endpoint> endpoints() {
         String urlString = String.format("%s/api/v1/namespaces/%s/pods", kubernetesMaster, namespace);
-        return enrichWithPublicAddress(parsePodsList(callGet(urlString)));
-
+        return enrichPublicAddresses(parsePodsList(callGet(urlString)));
     }
 
+    /**
+     * Retrieves POD addresses for all services in the specified {@code namespace} filtered by {@code serviceLabel}
+     * and {@code serviceLabelValue}.
+     *
+     * @param serviceLabel      label used to filter responses
+     * @param serviceLabelValue label value used to filter responses
+     * @return all POD addresses from the specified {@code namespace} filtered by the label
+     * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#list-143">Kubernetes Endpoint API</a>
+     */
     List<Endpoint> endpointsByLabel(String serviceLabel, String serviceLabelValue) {
         String param = String.format("labelSelector=%s=%s", serviceLabel, serviceLabelValue);
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints?%s", kubernetesMaster, namespace, param);
-        return enrichWithPublicAddress(parseEndpointsList(callGet(urlString)));
+        return enrichPublicAddresses(parseEndpointsList(callGet(urlString)));
     }
 
+    /**
+     * Retrieves POD addresses from the specified {@code namespace} and the given {@code endpointName}.
+     *
+     * @param endpointName endpoint name
+     * @return all POD addresses from the specified {@code namespace} and the given {@code endpointName}
+     * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#list-143">Kubernetes Endpoint API</a>
+     */
     List<Endpoint> endpointsByName(String endpointName) {
         String urlString = String.format("%s/api/v1/namespaces/%s/endpoints/%s", kubernetesMaster, namespace, endpointName);
-        return enrichWithPublicAddress(parseEndpoint(callGet(urlString)));
+        return enrichPublicAddresses(parseEndpoint(callGet(urlString)));
     }
 
+    /**
+     * Retrieves zone name for the specified {@code namespace} and the given {@code podName}.
+     * <p>
+     * Note that the Kubernetes environment must provide such information as defined
+     * <a href="https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints">here</a>.
+     *
+     * @param podName POD name
+     * @return zone name
+     * @see <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11">Kubernetes Endpoint API</a>
+     */
     String zone(String podName) {
         String podUrlString = String.format("%s/api/v1/namespaces/%s/pods/%s", kubernetesMaster, namespace, podName);
         JsonObject podJson = callGet(podUrlString);
@@ -82,7 +113,114 @@ class KubernetesClient {
         return parseZone(nodeJson);
     }
 
-    private List<Endpoint> enrichWithPublicAddress(List<Endpoint> endpoints) {
+    private static List<Endpoint> parsePodsList(JsonObject json) {
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+
+        for (JsonValue item : toJsonArray(json.get("items"))) {
+            JsonObject status = item.asObject().get("status").asObject();
+            String ip = toString(status.get("podIP"));
+            if (ip != null) {
+                Integer port = getPortFromPodItem(item);
+                addresses.add(new Endpoint(new EndpointAddress(ip, port), isReady(status)));
+            }
+        }
+        return addresses;
+    }
+
+    private static boolean isReady(JsonObject status) {
+        for (JsonValue containerStatus : toJsonArray(status.get("containerStatuses"))) {
+            // If multiple containers are in one POD, then each needs to be ready.
+            if (!containerStatus.asObject().get("ready").asBoolean()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<Endpoint> parseEndpointsList(JsonObject json) {
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+
+        for (JsonValue object : toJsonArray(json.get("items"))) {
+            List<Endpoint> endpoints = parseEndpoint(object);
+            addresses.addAll(endpoints);
+        }
+
+        return addresses;
+    }
+
+    private static List<Endpoint> parseEndpoint(JsonValue endpointsJson) {
+        List<Endpoint> addresses = new ArrayList<Endpoint>();
+
+        for (JsonValue subset : toJsonArray(endpointsJson.asObject().get("subsets"))) {
+            Integer endpointPort = parseEndpointPort(subset);
+            for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
+                addresses.add(parseEntrypointAddress(address, endpointPort, true));
+            }
+            for (JsonValue notReadyAddress : toJsonArray(subset.asObject().get("notReadyAddresses"))) {
+                addresses.add(parseEntrypointAddress(notReadyAddress, endpointPort, false));
+            }
+        }
+        return addresses;
+    }
+
+    private static Integer parseEndpointPort(JsonValue subset) {
+        JsonArray ports = toJsonArray(subset.asObject().get("ports"));
+        if (ports.size() == 1) {
+            JsonValue port = ports.get(0);
+            return port.asObject().get("port").asInt();
+        }
+        return null;
+    }
+
+    private static Endpoint parseEntrypointAddress(JsonValue endpointAddressJson, Integer endpointPort, boolean isReady) {
+        String ip = endpointAddressJson.asObject().get("ip").asString();
+        Integer port = getPortFromEndpointAddress(endpointAddressJson, endpointPort);
+        Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
+        return new Endpoint(new EndpointAddress(ip, port), isReady, additionalProperties);
+    }
+
+    private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson, Integer endpointPort) {
+        JsonValue servicePort = endpointAddressJson.asObject().get("hazelcast-service-port");
+        if (servicePort != null && servicePort.isNumber()) {
+            return servicePort.asInt();
+        }
+        return endpointPort;
+    }
+
+    private static Map<String, Object> parseAdditionalProperties(JsonValue endpointAddressJson) {
+        Set<String> knownFieldNames = new HashSet<String>(
+                Arrays.asList("ip", "nodeName", "targetRef", "hostname", "hazelcast-service-port"));
+
+        Map<String, Object> result = new HashMap<String, Object>();
+        Iterator<JsonObject.Member> iter = endpointAddressJson.asObject().iterator();
+        while (iter.hasNext()) {
+            JsonObject.Member member = iter.next();
+            if (!knownFieldNames.contains(member.getName())) {
+                result.put(member.getName(), toString(member.getValue()));
+            }
+        }
+        return result;
+    }
+
+    private static String parseZone(JsonObject json) {
+        JsonObject labels = json.get("metadata").asObject().get("labels").asObject();
+        JsonValue zone = labels.get("failure-domain.kubernetes.io/zone");
+        if (zone != null) {
+            return toString(zone);
+        }
+        return toString(labels.get("failure-domain.beta.kubernetes.io/zone"));
+    }
+
+    private static String parseNodeName(JsonObject json) {
+        return toString(json.get("spec").asObject().get("nodeName"));
+    }
+
+    /**
+     * Tries to add public addresses to the endpoints.
+     * <p>
+     * If it's not possible, then returns the input parameter.
+     */
+    private List<Endpoint> enrichPublicAddresses(List<Endpoint> endpoints) {
         try {
             List<EndpointAddress> pods = extractPodsFrom(endpoints);
 
@@ -244,39 +382,8 @@ class KubernetesClient {
         EndpointAddress pod = new EndpointAddress(endpoint.getPrivateAddress().getIp(), endpoint.getPrivateAddress().getPort());
         String publicIp = nodeToPublicIp.get(podToNodeName.get(pod));
         Integer publicPort = Integer.parseInt(serviceToNodePort.get(podToServiceName.get(pod)));
-        return new Endpoint(endpoint.getPrivateAddress(), new EndpointAddress(publicIp, publicPort));
-    }
-
-    private JsonObject callGet(final String urlString) {
-        try {
-            return RetryUtils.retry(new Callable<JsonObject>() {
-                @Override
-                public JsonObject call() {
-                    return Json
-                            .parse(RestClient.create(urlString).withHeader("Authorization", String.format("Bearer %s", apiToken))
-                                             .withCaCertificate(caCertificate)
-                                             .get())
-                            .asObject();
-                }
-            }, RETRIES, NON_RETRYABLE_KEYWORDS);
-        } catch (Exception e) {
-            throw new KubernetesClientException("Failure in KubernetesClient", e);
-        }
-    }
-
-    private static List<Endpoint> parsePodsList(JsonObject json) {
-        List<Endpoint> addresses = new ArrayList<Endpoint>();
-
-        for (JsonValue item : toJsonArray(json.get("items"))) {
-            JsonObject status = item.asObject().get("status").asObject();
-            String ip = toString(status.get("podIP"));
-            if (ip != null) {
-                Integer port = getPortFromPodItem(item);
-                addresses.add(new Endpoint(new EndpointAddress(ip, port), isReady(status)));
-            }
-        }
-
-        return addresses;
+        return new Endpoint(endpoint.getPrivateAddress(), new EndpointAddress(publicIp, publicPort), endpoint.isReady(),
+                endpoint.getAdditionalProperties());
     }
 
     private static Integer getPortFromPodItem(JsonValue item) {
@@ -297,94 +404,28 @@ class KubernetesClient {
         return null;
     }
 
-    private static boolean isReady(JsonObject status) {
-        for (JsonValue containerStatus : toJsonArray(status.get("containerStatuses"))) {
-            // If multiple containers are in one POD, then each needs to be ready.
-            if (!containerStatus.asObject().get("ready").asBoolean()) {
-                return false;
-            }
+    /**
+     * Makes a REST call to Kubernetes API and returns the result JSON.
+     *
+     * @param urlString Kubernetes API REST endpoint
+     * @return parsed JSON
+     * @throws KubernetesClientException if Kubernetes API didn't respond with 200 and a valid JSON content
+     */
+    private JsonObject callGet(final String urlString) {
+        try {
+            return RetryUtils.retry(new Callable<JsonObject>() {
+                @Override
+                public JsonObject call() {
+                    return Json
+                            .parse(RestClient.create(urlString).withHeader("Authorization", String.format("Bearer %s", apiToken))
+                                             .withCaCertificate(caCertificate)
+                                             .get())
+                            .asObject();
+                }
+            }, RETRIES, NON_RETRYABLE_KEYWORDS);
+        } catch (Exception e) {
+            throw new KubernetesClientException("Failure in KubernetesClient", e);
         }
-        return true;
-    }
-
-    private static List<Endpoint> parseEndpointsList(JsonObject json) {
-        List<Endpoint> addresses = new ArrayList<Endpoint>();
-        List<Endpoint> notReadyAddresses = new ArrayList<Endpoint>();
-
-        for (JsonValue object : toJsonArray(json.get("items"))) {
-            List<Endpoint> endpoints = parseEndpoint(object);
-            addresses.addAll(endpoints);
-        }
-
-        return addresses;
-    }
-
-    private static List<Endpoint> parseEndpoint(JsonValue endpointsJson) {
-        List<Endpoint> addresses = new ArrayList<Endpoint>();
-        List<Endpoint> notReadyAddresses = new ArrayList<Endpoint>();
-
-        for (JsonValue subset : toJsonArray(endpointsJson.asObject().get("subsets"))) {
-            Integer endpointPort = parseEndpointPort(subset);
-            for (JsonValue address : toJsonArray(subset.asObject().get("addresses"))) {
-                addresses.add(parseEntrypointAddress(address, endpointPort, true));
-            }
-            for (JsonValue notReadyAddress : toJsonArray(subset.asObject().get("notReadyAddresses"))) {
-                addresses.add(parseEntrypointAddress(notReadyAddress, endpointPort, false));
-            }
-        }
-        return addresses;
-    }
-
-    private static Integer parseEndpointPort(JsonValue subset) {
-        JsonArray ports = toJsonArray(subset.asObject().get("ports"));
-        if (ports.size() == 1) {
-            JsonValue port = ports.get(0);
-            return port.asObject().get("port").asInt();
-        }
-        return null;
-    }
-
-    private static Endpoint parseEntrypointAddress(JsonValue endpointAddressJson, Integer endpointPort, boolean isReady) {
-        String ip = endpointAddressJson.asObject().get("ip").asString();
-        Integer port = getPortFromEndpointAddress(endpointAddressJson, endpointPort);
-        Map<String, Object> additionalProperties = parseAdditionalProperties(endpointAddressJson);
-        return new Endpoint(new EndpointAddress(ip, port), isReady, additionalProperties);
-    }
-
-    private static Integer getPortFromEndpointAddress(JsonValue endpointAddressJson, Integer endpointPort) {
-        JsonValue servicePort = endpointAddressJson.asObject().get("hazelcast-service-port");
-        if (servicePort != null && servicePort.isNumber()) {
-            return servicePort.asInt();
-        }
-        return endpointPort;
-    }
-
-    private static Map<String, Object> parseAdditionalProperties(JsonValue endpointAddressJson) {
-        Set<String> knownFieldNames = new HashSet<String>(
-                Arrays.asList("ip", "nodeName", "targetRef", "hostname", "hazelcast-service-port"));
-
-        Map<String, Object> result = new HashMap<String, Object>();
-        Iterator<JsonObject.Member> iter = endpointAddressJson.asObject().iterator();
-        while (iter.hasNext()) {
-            JsonObject.Member member = iter.next();
-            if (!knownFieldNames.contains(member.getName())) {
-                result.put(member.getName(), toString(member.getValue()));
-            }
-        }
-        return result;
-    }
-
-    private static String parseNodeName(JsonObject json) {
-        return toString(json.get("spec").asObject().get("nodeName"));
-    }
-
-    private static String parseZone(JsonObject json) {
-        JsonObject labels = json.get("metadata").asObject().get("labels").asObject();
-        JsonValue zone = labels.get("failure-domain.kubernetes.io/zone");
-        if (zone != null) {
-            return toString(zone);
-        }
-        return toString(labels.get("failure-domain.beta.kubernetes.io/zone"));
     }
 
     private static JsonArray toJsonArray(JsonValue jsonValue) {
@@ -414,13 +455,6 @@ class KubernetesClient {
         private final boolean isReady;
         private final Map<String, Object> additionalProperties;
 
-        Endpoint(EndpointAddress privateAddress) {
-            this.privateAddress = privateAddress;
-            this.publicAddress = null;
-            this.isReady = true;
-            this.additionalProperties = EMPTY_MAP;
-        }
-
         Endpoint(EndpointAddress privateAddress, boolean isReady) {
             this.privateAddress = privateAddress;
             this.publicAddress = null;
@@ -433,20 +467,6 @@ class KubernetesClient {
             this.publicAddress = null;
             this.isReady = isReady;
             this.additionalProperties = additionalProperties;
-        }
-
-        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress) {
-            this.privateAddress = privateAddress;
-            this.publicAddress = publicAddress;
-            this.isReady = true;
-            this.additionalProperties = EMPTY_MAP;
-        }
-
-        Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, boolean isReady) {
-            this.privateAddress = privateAddress;
-            this.publicAddress = publicAddress;
-            this.isReady = isReady;
-            this.additionalProperties = EMPTY_MAP;
         }
 
         Endpoint(EndpointAddress privateAddress, EndpointAddress publicAddress, boolean isReady,
@@ -465,11 +485,11 @@ class KubernetesClient {
             return privateAddress;
         }
 
-        public boolean isReady() {
+        boolean isReady() {
             return isReady;
         }
 
-        public Map<String, Object> getAdditionalProperties() {
+        Map<String, Object> getAdditionalProperties() {
             return additionalProperties;
         }
     }
@@ -515,5 +535,4 @@ class KubernetesClient {
             return result;
         }
     }
-
 }
