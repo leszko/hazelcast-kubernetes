@@ -17,7 +17,6 @@
 package com.hazelcast.kubernetes;
 
 import com.hazelcast.config.NetworkConfig;
-import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
 import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.nio.Address;
@@ -61,10 +60,9 @@ class KubernetesApiEndpointResolver
         return getSimpleDiscoveryNodes(client.endpoints());
     }
 
-    private List<DiscoveryNode> getSimpleDiscoveryNodes(Endpoints endpoints) {
+    private List<DiscoveryNode> getSimpleDiscoveryNodes(List<Endpoint> endpoints) {
         List<DiscoveryNode> discoveredNodes = new ArrayList<DiscoveryNode>();
-        resolveNotReadyAddresses(discoveredNodes, endpoints.getNotReadyAddresses());
-        resolveAddresses(discoveredNodes, endpoints.getAddresses());
+        resolveAddresses(discoveredNodes, endpoints);
         return discoveredNodes;
     }
 
@@ -81,11 +79,14 @@ class KubernetesApiEndpointResolver
     }
 
     private void addAddress(List<DiscoveryNode> discoveredNodes, Endpoint endpoint) {
-        Address address = createAddress(endpoint.getPrivateAddress());
-        Address publicAddress = createAddress(endpoint.getPublicAddress());
-        discoveredNodes.add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getPrivateAddress().getAdditionalProperties()));
-        if (logger.isFinestEnabled()) {
-            logger.finest("Found node service with address: " + address);
+        if (Boolean.TRUE.equals(resolveNotReadyAddresses) || endpoint.getPrivateAddress().isReady()) {
+            Address address = createAddress(endpoint.getPrivateAddress());
+            Address publicAddress = createAddress(endpoint.getPublicAddress());
+            discoveredNodes
+                    .add(new SimpleDiscoveryNode(address, publicAddress, endpoint.getPrivateAddress().getAdditionalProperties()));
+            if (logger.isFinestEnabled()) {
+                logger.finest("Found node service with address: " + address);
+            }
         }
     }
 

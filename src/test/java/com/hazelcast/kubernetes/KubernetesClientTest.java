@@ -18,7 +18,6 @@ package com.hazelcast.kubernetes;
 
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.hazelcast.kubernetes.KubernetesClient.Endpoint;
-import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -93,11 +92,19 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(podsListBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpoints();
+        List<Endpoint> result = kubernetesClient.endpoints();
 
         // then
-        assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
-        assertThat(extractPrivateIpPort(result.getNotReadyAddresses()), containsInAnyOrder(ipPort(NOT_READY_PRIVATE_IP, null)));
+        assertThat(extractPrivateIpPortIsReady(result),
+                containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP)));
+    }
+
+    private String ready(String ipPort) {
+        return String.format("%s:%s", ipPort, true);
+    }
+
+    private String notReady(String ipPort) {
+        return String.format("%s:%s", ipPort, false);
     }
 
     @Test
@@ -127,13 +134,13 @@ public class KubernetesClientTest {
                                        .withBody(serviceBodyPublicIp(NOT_READY_SERVICE_NAME, NOT_READY_PUBLIC_PORT.toString()))));
 
         // when
-        Endpoints result = kubernetesClient.endpoints();
+        List<Endpoint> result = kubernetesClient.endpoints();
 
         // then
-        assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
-        assertThat(extractPublicIpPort(result.getAddresses()), containsInAnyOrder(PUBLIC_IP_PORT_1, PUBLIC_IP_PORT_2));
-        assertThat(extractPrivateIpPort(result.getNotReadyAddresses()), containsInAnyOrder(NOT_READY_PRIVATE_IP_PORT));
-        assertThat(extractPublicIpPort(result.getNotReadyAddresses()), containsInAnyOrder(NOT_READY_PUBLIC_IP_PORT));
+        assertThat(extractPrivateIpPortIsReady(result),
+                containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP_PORT)));
+        assertThat(extractPublicIpPortIsReady(result), containsInAnyOrder(ready(PUBLIC_IP_PORT_1), ready(PUBLIC_IP_PORT_2),
+                notReady(NOT_READY_PUBLIC_IP_PORT)));
     }
 
     @Test
@@ -147,11 +154,10 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(endpointsListBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpointsByLabel(serviceLabel, serviceLabelValue);
+        List<Endpoint> result = kubernetesClient.endpointsByLabel(serviceLabel, serviceLabelValue);
 
         // then
-        assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
-        assertThat(extractPrivateIpPort(result.getNotReadyAddresses()), containsInAnyOrder(ipPort(NOT_READY_PRIVATE_IP, null)));
+        assertThat(extractPrivateIpPortIsReady(result), containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP_PORT)));
 
     }
 
@@ -164,11 +170,10 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(endpointsBody())));
 
         // when
-        Endpoints result = kubernetesClient.endpointsByName(serviceName);
+        List<Endpoint> result = kubernetesClient.endpointsByName(serviceName);
 
         // then
-        assertThat(extractPrivateIpPort(result.getAddresses()), containsInAnyOrder(PRIVATE_IP_PORT_1, PRIVATE_IP_PORT_2));
-        assertTrue(result.getNotReadyAddresses().isEmpty());
+        assertThat(extractPrivateIpPortIsReady(result), containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2)));
     }
 
     @Test
@@ -2491,22 +2496,28 @@ public class KubernetesClientTest {
         return "malformed response";
     }
 
-    private static List<String> extractPrivateIpPort(List<Endpoint> addresses) {
+    private static List<String> extractPrivateIpPortIsReady(List<Endpoint> addresses) {
         List<String> result = new ArrayList<String>();
         for (Endpoint address : addresses) {
             String ip = address.getPrivateAddress().getIp();
             Integer port = address.getPrivateAddress().getPort();
-            result.add(ipPort(ip, port));
+            boolean isReady = address.getPrivateAddress().isReady();
+            result.add(toString(ip, port, isReady));
         }
         return result;
     }
 
-    private static List<String> extractPublicIpPort(List<Endpoint> addresses) {
+    private static String toString(String host, Integer port, boolean isReady) {
+        return String.format("%s:%s:%s", host, port, isReady);
+    }
+
+    private static List<String> extractPublicIpPortIsReady(List<Endpoint> addresses) {
         List<String> result = new ArrayList<String>();
         for (Endpoint address : addresses) {
             String ip = address.getPublicAddress().getIp();
             Integer port = address.getPublicAddress().getPort();
-            result.add(ipPort(ip, port));
+            boolean isReady = address.getPublicAddress().isReady();
+            result.add(toString(ip, port, isReady));
         }
         return result;
     }

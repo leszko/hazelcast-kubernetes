@@ -16,7 +16,6 @@
 
 package com.hazelcast.kubernetes;
 
-import com.hazelcast.kubernetes.KubernetesClient.Endpoints;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
