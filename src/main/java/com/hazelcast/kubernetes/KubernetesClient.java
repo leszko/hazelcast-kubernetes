@@ -193,12 +193,12 @@ class KubernetesClient {
 
     private static Endpoint parseEntrypointAddress(JsonValue endpointAddressJson, Integer endpointPort, boolean isReady) {
         String ip = endpointAddressJson.asObject().get("ip").asString();
-        Integer port = extractServicePortFrom(endpointAddressJson, endpointPort);
+        Integer port = extractHazelcastServicePortFrom(endpointAddressJson, endpointPort);
         Map<String, Object> additionalProperties = extractAdditionalPropertiesFrom(endpointAddressJson);
         return new Endpoint(new EndpointAddress(ip, port), isReady, additionalProperties);
     }
 
-    private static Integer extractServicePortFrom(JsonValue endpointAddressJson, Integer endpointPort) {
+    private static Integer extractHazelcastServicePortFrom(JsonValue endpointAddressJson, Integer endpointPort) {
         JsonValue servicePort = endpointAddressJson.asObject().get("hazelcast-service-port");
         if (servicePort != null && servicePort.isNumber()) {
             return servicePort.asInt();
@@ -248,16 +248,60 @@ class KubernetesClient {
             Map<EndpointAddress, String> services = extractServicesFrom(endpointsResponse, privateAddresses);
             Map<EndpointAddress, String> nodes = extractNodesFrom(endpointsResponse, privateAddresses);
 
-            Map<EndpointAddress, Integer> nodePorts = nodePortsFor(services);
-            Map<EndpointAddress, String> nodePublicIps = publicIpsFor(nodes);
+            Map<EndpointAddress, String> publicIps = new HashMap<EndpointAddress, String>();
+            Map<EndpointAddress, Integer> publicPorts = new HashMap<EndpointAddress, Integer>();
+            Map<String, String> cachedNodePublicIps = new HashMap<String, String>();
+            for (EndpointAddress privateAddress : services.keySet()) {
+                String service = services.get(privateAddress);
+                String urlString = String.format("%s/api/v1/namespaces/%s/services/%s", kubernetesMaster, namespace, service);
+                JsonObject serviceResponse = callGet(urlString);
 
-            return createEndpoints(endpoints, nodePublicIps, nodePorts);
+                try {
+                    String loadBalancerIp = extractLoadBalancerIpFrom(serviceResponse);
+                    Integer servicePort = extractServicePortFrom(serviceResponse);
+                    publicIps.put(privateAddress, loadBalancerIp);
+                    publicPorts.put(privateAddress, servicePort);
+                } catch (Exception e) {
+                    // Load Balancer public IP cannot be found, try using Node Port.
+                    Integer nodePort = extractNodePort(serviceResponse);
+                    String node = nodes.get(privateAddress);
+                    String nodePublicIp;
+                    if (cachedNodePublicIps.containsKey(node)) {
+                        nodePublicIp = cachedNodePublicIps.get(node);
+                    } else {
+                        String nodeUrlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, node);
+                        nodePublicIp = extractPublicIpFrom(callGet(nodeUrlString));
+                        cachedNodePublicIps.put(node, nodePublicIp);
+                    }
+                    publicIps.put(privateAddress, nodePublicIp);
+                    publicPorts.put(privateAddress, nodePort);
+                }
+            }
+            Map<EndpointAddress, Integer> nodePorts = nodePortsFor(services);
+
+            return createEndpoints(endpoints, publicIps, publicPorts);
         } catch (Exception e) {
-            LOGGER.finest(e);
+            LOGGER.warning(e);
             LOGGER.warning(
                     "Cannot fetch public IPs of Hazelcast Member PODs, won't be able to use Hazelcast Smart Client from outside the Kubernetes network");
             return endpoints;
         }
+    }
+
+    private Integer extractServicePortFrom(JsonObject serviceResponse) {
+        JsonArray ports = toJsonArray(serviceResponse.get("spec").asObject().get("ports"));
+        if (ports.size() != 1) {
+            // Service must have one and only one Node Port assigned.
+            throw new KubernetesClientException("Cannot fetch nodePort from the service");
+        }
+        return ports.get(0).asObject().get("port").asInt();
+    }
+
+    private String extractLoadBalancerIpFrom(JsonObject serviceResponse) {
+        return serviceResponse.get("status").asObject()
+                              .get("loadBalancer").asObject()
+                              .get("ingress").asArray().get(0).asObject()
+                              .get("ip").asString();
     }
 
     private static List<EndpointAddress> privateAddressesFrom(List<Endpoint> endpoints) {
@@ -358,23 +402,6 @@ class KubernetesClient {
         return ports.get(0).asObject().get("nodePort").asInt();
     }
 
-    private Map<EndpointAddress, String> publicIpsFor(Map<EndpointAddress, String> nodes) {
-        Map<EndpointAddress, String> result = new HashMap<EndpointAddress, String>();
-        Map<String, String> publicIpByNode = new HashMap<String, String>();
-        for (EndpointAddress privateAddress : nodes.keySet()) {
-            String node = nodes.get(privateAddress);
-            if (publicIpByNode.containsKey(node)) {
-                result.put(privateAddress, publicIpByNode.get(node));
-            } else {
-                String urlString = String.format("%s/api/v1/nodes/%s", kubernetesMaster, node);
-                String publicIp = extractPublicIpFrom(callGet(urlString));
-                result.put(privateAddress, publicIp);
-                publicIpByNode.put(node, publicIp);
-            }
-        }
-        return result;
-    }
-
     private static String extractPublicIpFrom(JsonObject nodeJson) {
         for (JsonValue address : toJsonArray(nodeJson.get("status").asObject().get("addresses"))) {
             if ("ExternalIP".equals(address.asObject().get("type").asString())) {
@@ -384,13 +411,13 @@ class KubernetesClient {
         throw new KubernetesClientException("Node does not have ExternalIP assigned");
     }
 
-    private static List<Endpoint> createEndpoints(List<Endpoint> endpoints, Map<EndpointAddress, String> nodePublicIps,
-                                                  Map<EndpointAddress, Integer> nodePorts) {
+    private static List<Endpoint> createEndpoints(List<Endpoint> endpoints, Map<EndpointAddress, String> publicIps,
+                                                  Map<EndpointAddress, Integer> publicPorts) {
         List<Endpoint> result = new ArrayList<Endpoint>();
         for (Endpoint endpoint : endpoints) {
             EndpointAddress privateAddress = endpoint.getPrivateAddress();
-            EndpointAddress publicAddress = new EndpointAddress(nodePublicIps.get(privateAddress),
-                    nodePorts.get(privateAddress));
+            EndpointAddress publicAddress = new EndpointAddress(publicIps.get(privateAddress),
+                    publicPorts.get(privateAddress));
             result.add(new Endpoint(privateAddress, publicAddress, endpoint.isReady(), endpoint.getAdditionalProperties()));
         }
         return result;

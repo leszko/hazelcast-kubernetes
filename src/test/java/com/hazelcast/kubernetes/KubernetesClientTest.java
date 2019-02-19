@@ -36,7 +36,6 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class KubernetesClientTest {
     private static final String KUBERNETES_MASTER_IP = "localhost";
@@ -48,8 +47,9 @@ public class KubernetesClientTest {
     private static final String PRIVATE_IP_1 = "192.168.0.25";
     private static final String PRIVATE_IP_2 = "172.17.0.5";
     private static final String NOT_READY_PRIVATE_IP = "172.17.0.6";
-    private static final String NODE_IP_1 = "35.232.226.200";
-    private static final String NODE_IP_2 = "35.232.226.201";
+    private static final String IP_1 = "35.232.226.200";
+    private static final String IP_2 = "35.232.226.201";
+    private static final String IP_3 = "35.232.226.202";
     private static final Integer PRIVATE_PORT_1 = 5701;
     private static final Integer PRIVATE_PORT_2 = 5702;
     private static final Integer NOT_READY_PRIVATE_PORT = 5703;
@@ -59,9 +59,9 @@ public class KubernetesClientTest {
     private static final String PRIVATE_IP_PORT_1 = ipPort(PRIVATE_IP_1, PRIVATE_PORT_1);
     private static final String PRIVATE_IP_PORT_2 = ipPort(PRIVATE_IP_2, PRIVATE_PORT_2);
     private static final String NOT_READY_PRIVATE_IP_PORT = ipPort(NOT_READY_PRIVATE_IP, NOT_READY_PRIVATE_PORT);
-    private static final String PUBLIC_IP_PORT_1 = ipPort(NODE_IP_1, PUBLIC_PORT_1);
-    private static final String PUBLIC_IP_PORT_2 = ipPort(NODE_IP_2, PUBLIC_PORT_2);
-    private static final String NOT_READY_PUBLIC_IP_PORT = ipPort(NODE_IP_1, NOT_READY_PUBLIC_PORT);
+    private static final String PUBLIC_IP_PORT_1 = ipPort(IP_1, PUBLIC_PORT_1);
+    private static final String PUBLIC_IP_PORT_2 = ipPort(IP_2, PUBLIC_PORT_2);
+    private static final String NOT_READY_PUBLIC_IP_PORT = ipPort(IP_1, NOT_READY_PUBLIC_PORT);
     private static final String POD_NAME_1 = "my-release-hazelcast-0";
     private static final String POD_NAME_2 = "my-release-hazelcast-1";
     private static final String NOT_READY_POD_NAME = "my-release-hazelcast-2";
@@ -108,7 +108,42 @@ public class KubernetesClientTest {
     }
 
     @Test
-    public void endpointsByNamespaceWithPublicIp() {
+    public void endpointsByNamespaceWithLoadBalancerPublicIp() {
+        // given
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/pods", NAMESPACE)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(podsListBodyPublicIp())));
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/endpoints", NAMESPACE)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200).withBody(endpointsListBodyPublicIp())));
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, SERVICE_NAME_1)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(
+                        aResponse().withStatus(200)
+                                   .withBody(serviceBodyLoadBalancerPublicIp(SERVICE_NAME_1, IP_1, PUBLIC_PORT_1.toString()))));
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, SERVICE_NAME_2)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(
+                        aResponse().withStatus(200)
+                                   .withBody(serviceBodyLoadBalancerPublicIp(SERVICE_NAME_2, IP_2, PUBLIC_PORT_2.toString()))));
+        stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, NOT_READY_SERVICE_NAME)))
+                .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
+                .willReturn(aResponse().withStatus(200)
+                                       .withBody(serviceBodyLoadBalancerPublicIp(NOT_READY_SERVICE_NAME, IP_3,
+                                               NOT_READY_PUBLIC_PORT.toString()))));
+
+        // when
+        List<Endpoint> result = kubernetesClient.endpoints();
+
+        // then
+        assertThat(extractPrivateIpPortIsReady(result),
+                containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP_PORT)));
+        assertThat(extractPublicIpPortIsReady(result), containsInAnyOrder(ready(PUBLIC_IP_PORT_1), ready(PUBLIC_IP_PORT_2),
+                notReady(ipPort(IP_3, NOT_READY_PUBLIC_PORT))));
+    }
+
+    @Test
+    public void endpointsByNamespaceWithNodePublicIp() {
         // given
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/pods", NAMESPACE)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
@@ -118,20 +153,23 @@ public class KubernetesClientTest {
                 .willReturn(aResponse().withStatus(200).withBody(endpointsListBodyPublicIp())));
         stubFor(get(urlEqualTo(String.format("/api/v1/nodes/%s", NODE_NAME_1)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(nodeBodyPublicIp(NODE_NAME_1, NODE_IP_1))));
+                .willReturn(aResponse().withStatus(200).withBody(nodeBodyPublicIp(NODE_NAME_1, IP_1))));
         stubFor(get(urlEqualTo(String.format("/api/v1/nodes/%s", NODE_NAME_2)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(nodeBodyPublicIp(NODE_NAME_2, NODE_IP_2))));
+                .willReturn(aResponse().withStatus(200).withBody(nodeBodyPublicIp(NODE_NAME_2, IP_2))));
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, SERVICE_NAME_1)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(serviceBodyPublicIp(SERVICE_NAME_1, PUBLIC_PORT_1.toString()))));
+                .willReturn(
+                        aResponse().withStatus(200).withBody(serviceBodyNodePublicIp(SERVICE_NAME_1, PUBLIC_PORT_1.toString()))));
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, SERVICE_NAME_2)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
-                .willReturn(aResponse().withStatus(200).withBody(serviceBodyPublicIp(SERVICE_NAME_2, PUBLIC_PORT_2.toString()))));
+                .willReturn(
+                        aResponse().withStatus(200).withBody(serviceBodyNodePublicIp(SERVICE_NAME_2, PUBLIC_PORT_2.toString()))));
         stubFor(get(urlEqualTo(String.format("/api/v1/namespaces/%s/services/%s", NAMESPACE, NOT_READY_SERVICE_NAME)))
                 .withHeader("Authorization", equalTo(String.format("Bearer %s", TOKEN)))
                 .willReturn(aResponse().withStatus(200)
-                                       .withBody(serviceBodyPublicIp(NOT_READY_SERVICE_NAME, NOT_READY_PUBLIC_PORT.toString()))));
+                                       .withBody(serviceBodyNodePublicIp(NOT_READY_SERVICE_NAME,
+                                               NOT_READY_PUBLIC_PORT.toString()))));
 
         // when
         List<Endpoint> result = kubernetesClient.endpoints();
@@ -157,7 +195,8 @@ public class KubernetesClientTest {
         List<Endpoint> result = kubernetesClient.endpointsByLabel(serviceLabel, serviceLabelValue);
 
         // then
-        assertThat(extractPrivateIpPortIsReady(result), containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP_PORT)));
+        assertThat(extractPrivateIpPortIsReady(result),
+                containsInAnyOrder(ready(PRIVATE_IP_PORT_1), ready(PRIVATE_IP_PORT_2), notReady(NOT_READY_PRIVATE_IP_PORT)));
 
     }
 
@@ -1715,7 +1754,66 @@ public class KubernetesClientTest {
                 + "}", nodeName, publicIp);
     }
 
-    private static String serviceBodyPublicIp(String serviceName, String nodePort) {
+    private static String serviceBodyLoadBalancerPublicIp(String serviceName, String loadBalancerPublicIp, String servicePort) {
+
+        return String.format("{\n"
+                + "  \"kind\": \"Service\",\n"
+                + "  \"apiVersion\": \"v1\",\n"
+                + "  \"metadata\": {\n"
+                + "    \"name\": \"%s\",\n"
+                + "    \"namespace\": \"default\",\n"
+                + "    \"selfLink\": \"/api/v1/namespaces/default/services/my-release-hazelcast-1\",\n"
+                + "    \"uid\": \"50cf3f1f-3430-11e9-84a1-42010a80000a\",\n"
+                + "    \"resourceVersion\": \"6175\",\n"
+                + "    \"creationTimestamp\": \"2019-02-19T10:22:53Z\",\n"
+                + "    \"labels\": {\n"
+                + "      \"app\": \"service-per-pod\"\n"
+                + "    },\n"
+                + "    \"annotations\": {\n"
+                + "      \"metacontroller.k8s.io/decorator-controller\": \"service-per-pod\",\n"
+                + "      \"metacontroller.k8s.io/last-applied-configuration\": \"{\\\"apiVersion\\\":\\\"v1\\\",\\\"kind\\\":\\\"Service\\\",\\\"metadata\\\":{\\\"annotations\\\":{\\\"metacontroller.k8s.io/decorator-controller\\\":\\\"service-per-pod\\\"},\\\"labels\\\":{\\\"app\\\":\\\"service-per-pod\\\"},\\\"name\\\":\\\"my-release-hazelcast-1\\\"},\\\"spec\\\":{\\\"ports\\\":[{\\\"port\\\":5701,\\\"targetPort\\\":5701}],\\\"selector\\\":{\\\"statefulset.kubernetes.io/pod-name\\\":\\\"my-release-hazelcast-1\\\"},\\\"type\\\":\\\"LoadBalancer\\\"}}\"\n"
+                + "    },\n"
+                + "    \"ownerReferences\": [\n"
+                + "      {\n"
+                + "        \"apiVersion\": \"apps/v1beta1\",\n"
+                + "        \"kind\": \"StatefulSet\",\n"
+                + "        \"name\": \"my-release-hazelcast\",\n"
+                + "        \"uid\": \"4ad0ee47-3430-11e9-84a1-42010a80000a\",\n"
+                + "        \"controller\": true,\n"
+                + "        \"blockOwnerDeletion\": true\n"
+                + "      }\n"
+                + "    ]\n"
+                + "  },\n"
+                + "  \"spec\": {\n"
+                + "    \"ports\": [\n"
+                + "      {\n"
+                + "        \"protocol\": \"TCP\",\n"
+                + "        \"port\": %s,\n"
+                + "        \"targetPort\": 5701,\n"
+                + "        \"nodePort\": 31916\n"
+                + "      }\n"
+                + "    ],\n"
+                + "    \"selector\": {\n"
+                + "      \"statefulset.kubernetes.io/pod-name\": \"my-release-hazelcast-1\"\n"
+                + "    },\n"
+                + "    \"clusterIP\": \"10.19.240.108\",\n"
+                + "    \"type\": \"LoadBalancer\",\n"
+                + "    \"sessionAffinity\": \"None\",\n"
+                + "    \"externalTrafficPolicy\": \"Cluster\"\n"
+                + "  },\n"
+                + "  \"status\": {\n"
+                + "    \"loadBalancer\": {\n"
+                + "      \"ingress\": [\n"
+                + "        {\n"
+                + "          \"ip\": \"%s\"\n"
+                + "        }\n"
+                + "      ]\n"
+                + "    }\n"
+                + "  }\n"
+                + "}", serviceName, servicePort, loadBalancerPublicIp);
+    }
+
+    private static String serviceBodyNodePublicIp(String serviceName, String nodePort) {
         return String.format("{\n"
                 + "  \"kind\": \"Service\",\n"
                 + "  \"apiVersion\": \"v1\",\n"
