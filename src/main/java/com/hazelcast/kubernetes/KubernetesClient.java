@@ -43,7 +43,10 @@ class KubernetesClient {
     private static final ILogger LOGGER = Logger.getLogger(KubernetesClient.class);
 
     private static final int RETRIES = 10;
-    private static final List<String> NON_RETRYABLE_KEYWORDS = asList("\"reason\":\"Forbidden\"");
+    private static final List<String> NON_RETRYABLE_KEYWORDS = asList(
+            "\"reason\":\"Forbidden\"",
+            "\"reason\":\"Unauthorized\"",
+            "Failure in generating SSLSocketFactory");
 
     private final String namespace;
     private final String kubernetesMaster;
