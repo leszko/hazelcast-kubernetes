@@ -108,8 +108,18 @@ final class RestClient {
             }
 
             if (connection.getResponseCode() != HTTP_OK) {
-                throw new RestClientException(String.format("Failure executing: %s at: %s. Message: %s,", method, url,
-                        read(connection.getErrorStream())));
+                String errorMessage;
+                try {
+                    errorMessage = read(connection.getErrorStream());
+                } catch (Exception e) {
+                    throw new RestClientException(
+                            String.format("Failure executing: %s at: %s. Error Code: %s", method, url,
+                                    connection.getResponseCode()));
+                }
+                throw new RestClientException(
+                        String.format("Failure executing: %s at: %s. Error Code: %s, Message: %s", method, url,
+                                connection.getResponseCode(), errorMessage));
+
             }
             return read(connection.getInputStream());
         } catch (Exception e) {
