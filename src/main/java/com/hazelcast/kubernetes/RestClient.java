@@ -107,20 +107,7 @@ final class RestClient {
                 outputStream.flush();
             }
 
-            if (connection.getResponseCode() != HTTP_OK) {
-                String errorMessage;
-                try {
-                    errorMessage = read(connection.getErrorStream());
-                } catch (Exception e) {
-                    throw new RestClientException(
-                            String.format("Failure executing: %s at: %s. Error Code: %s", method, url,
-                                    connection.getResponseCode()));
-                }
-                throw new RestClientException(
-                        String.format("Failure executing: %s at: %s. Error Code: %s, Message: %s", method, url,
-                                connection.getResponseCode(), errorMessage));
-
-            }
+            checkHttpOk(method, connection);
             return read(connection.getInputStream());
         } catch (Exception e) {
             throw new RestClientException("Failure in executing REST call", e);
@@ -135,6 +122,24 @@ final class RestClient {
                     LOGGER.finest("Error while closing HTTP output stream", e);
                 }
             }
+        }
+    }
+
+    private void checkHttpOk(String method, HttpURLConnection connection)
+            throws IOException {
+        if (connection.getResponseCode() != HTTP_OK) {
+            String errorMessage;
+            try {
+                errorMessage = read(connection.getErrorStream());
+            } catch (Exception e) {
+                throw new RestClientException(
+                        String.format("Failure executing: %s at: %s. Error Code: %s", method, url,
+                                connection.getResponseCode()));
+            }
+            throw new RestClientException(
+                    String.format("Failure executing: %s at: %s. Error Code: %s, Message: %s", method, url,
+                            connection.getResponseCode(), errorMessage));
+
         }
     }
 

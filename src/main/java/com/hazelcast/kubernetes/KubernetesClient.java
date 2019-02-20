@@ -50,7 +50,7 @@ class KubernetesClient {
     private final String apiToken;
     private final String caCertificate;
 
-    private boolean isNoPublicIpAlreadyLogged = false;
+    private boolean isNoPublicIpAlreadyLogged;
 
     KubernetesClient(String namespace, String kubernetesMaster, String apiToken, String caCertificate) {
         this.namespace = namespace;
@@ -265,8 +265,9 @@ class KubernetesClient {
             Map<EndpointAddress, Integer> publicPorts = new HashMap<EndpointAddress, Integer>();
             Map<String, String> cachedNodePublicIps = new HashMap<String, String>();
 
-            for (EndpointAddress privateAddress : services.keySet()) {
-                String service = services.get(privateAddress);
+            for (Map.Entry<EndpointAddress, String> serviceEntry : services.entrySet()) {
+                EndpointAddress privateAddress = serviceEntry.getKey();
+                String service = serviceEntry.getValue();
                 String serviceUrl = String.format("%s/api/v1/namespaces/%s/services/%s", kubernetesMaster, namespace, service);
                 JsonObject serviceJson = callGet(serviceUrl);
                 try {
@@ -351,7 +352,8 @@ class KubernetesClient {
                 Map<EndpointAddress, String> nodes = new HashMap<EndpointAddress, String>();
                 nodes.putAll(extractNodes(subsetObject.get("addresses"), ports));
                 nodes.putAll(extractNodes(subsetObject.get("notReadyAddresses"), ports));
-                for (EndpointAddress address : nodes.keySet()) {
+                for (Map.Entry<EndpointAddress, String> nodeEntry : nodes.entrySet()) {
+                    EndpointAddress address = nodeEntry.getKey();
                     if (privateAddresses.contains(address)) {
                         result.put(address, nodes.get(address));
                         left.remove(address);
@@ -469,7 +471,7 @@ class KubernetesClient {
     /**
      * Result which stores the information about a single endpoint.
      */
-    final static class Endpoint {
+    static final class Endpoint {
         private final EndpointAddress privateAddress;
         private final EndpointAddress publicAddress;
         private final boolean isReady;
@@ -514,7 +516,7 @@ class KubernetesClient {
         }
     }
 
-    final static class EndpointAddress {
+    static final class EndpointAddress {
         private final String ip;
         private final Integer port;
 
