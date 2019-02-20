@@ -24,16 +24,15 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-import static java.util.Collections.EMPTY_MAP;
+import static java.util.Arrays.asList;
 
 /**
  * Responsible for connecting to the Kubernetes API.
@@ -44,7 +43,7 @@ class KubernetesClient {
     private static final ILogger LOGGER = Logger.getLogger(KubernetesClient.class);
 
     private static final int RETRIES = 10;
-    private static final List<String> NON_RETRYABLE_KEYWORDS = Arrays.asList("\"reason\":\"Forbidden\"");
+    private static final List<String> NON_RETRYABLE_KEYWORDS = asList("\"reason\":\"Forbidden\"");
 
     private final String namespace;
     private final String kubernetesMaster;
@@ -207,12 +206,10 @@ class KubernetesClient {
 
     private static Map<String, Object> extractAdditionalPropertiesFrom(JsonValue endpointAddressJson) {
         Set<String> knownFieldNames = new HashSet<String>(
-                Arrays.asList("ip", "nodeName", "targetRef", "hostname", "hazelcast-service-port"));
+                asList("ip", "nodeName", "targetRef", "hostname", "hazelcast-service-port"));
 
         Map<String, Object> result = new HashMap<String, Object>();
-        Iterator<JsonObject.Member> iter = endpointAddressJson.asObject().iterator();
-        while (iter.hasNext()) {
-            JsonObject.Member member = iter.next();
+        for (JsonObject.Member member : endpointAddressJson.asObject()) {
             if (!knownFieldNames.contains(member.getName())) {
                 result.put(member.getName(), toString(member.getValue()));
             }
@@ -244,9 +241,9 @@ class KubernetesClient {
      * <li>Each POD must be exposed with a separate NodePort service and Kubernetes nodes must have external IPs</li>
      * </ul>
      * <p>
-     * The algorithm to fetch public IPs can be described as follows:
+     * The algorithm to fetch public IPs is as follows:
      * <ol>
-     * <li>Use Kubernetes API (/endpoints) to find a dedicated services for each POD</li>
+     * <li>Use Kubernetes API (/endpoints) to find dedicated services for each POD</li>
      * <li>For each POD:
      * <ol>
      * <li>Use Kubernetes API (/services) to find the LoadBalancer External IP and Service Port</li>
@@ -278,7 +275,7 @@ class KubernetesClient {
                     publicIps.put(privateAddress, loadBalancerIp);
                     publicPorts.put(privateAddress, servicePort);
                 } catch (Exception e) {
-                    // Load Balancer public IP cannot be found, try using Node Port.
+                    // Load Balancer public IP cannot be found, try using NodePort.
                     Integer nodePort = extractNodePort(serviceJson);
                     String node = nodes.get(privateAddress);
                     String nodePublicIp;
@@ -348,7 +345,7 @@ class KubernetesClient {
                 JsonObject subsetObject = subset.asObject();
                 List<Integer> ports = new ArrayList<Integer>();
                 for (JsonValue port : toJsonArray(subsetObject.get("ports"))) {
-                    ports.add(new Integer(port.asObject().get("port").asInt()));
+                    ports.add(port.asObject().get("port").asInt());
                 }
 
                 Map<EndpointAddress, String> nodes = new HashMap<EndpointAddress, String>();
@@ -388,10 +385,10 @@ class KubernetesClient {
                               .get("ip").asString();
     }
 
-    private static Integer extractServicePort(JsonObject serviceResponse) {
-        JsonArray ports = toJsonArray(serviceResponse.get("spec").asObject().get("ports"));
+    private static Integer extractServicePort(JsonObject serviceJson) {
+        JsonArray ports = toJsonArray(serviceJson.get("spec").asObject().get("ports"));
+        // Service must have one and only one Node Port assigned.
         if (ports.size() != 1) {
-            // Service must have one and only one Node Port assigned.
             throw new KubernetesClientException("Cannot fetch nodePort from the service");
         }
         return ports.get(0).asObject().get("port").asInt();
@@ -399,8 +396,8 @@ class KubernetesClient {
 
     private static Integer extractNodePort(JsonObject serviceJson) {
         JsonArray ports = toJsonArray(serviceJson.get("spec").asObject().get("ports"));
+        // Service must have one and only one Node Port assigned.
         if (ports.size() != 1) {
-            // Service must have one and only one Node Port assigned.
             throw new KubernetesClientException("Cannot fetch nodePort from the service");
         }
         return ports.get(0).asObject().get("nodePort").asInt();
@@ -482,7 +479,7 @@ class KubernetesClient {
             this.privateAddress = privateAddress;
             this.publicAddress = null;
             this.isReady = isReady;
-            this.additionalProperties = EMPTY_MAP;
+            this.additionalProperties = Collections.emptyMap();
         }
 
         Endpoint(EndpointAddress privateAddress, boolean isReady, Map<String, Object> additionalProperties) {
