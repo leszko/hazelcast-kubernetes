@@ -112,7 +112,7 @@ final class RestClient {
             checkHttpOk(method, connection);
             return read(connection.getInputStream());
         } catch (IOException e) {
-            throw new RestClientException("Failure in executing REST call", e);
+            throw new RestClientException("Failure in executing REST call ", e);
         } finally {
             if (connection != null) {
                 connection.disconnect();
